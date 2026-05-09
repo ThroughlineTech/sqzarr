@@ -12,6 +12,25 @@ SQZARR supports three hardware encoders for HEVC transcoding:
 
 If hardware devices are not available or passed through to your container, SQZARR automatically falls back to software encoding. Check the startup logs to see which encoder was selected.
 
+## Quick Reference
+
+| GPU vendor | Primary nodes to pass through | Encoder path |
+|-----------|-------------------------------|--------------|
+| Intel | `/dev/dri/renderD128` (+ optional `/dev/dri/card0`) | VAAPI (`hevc_vaapi`) |
+| AMD | `/dev/dri/renderD128` (+ optional `/dev/dri/card0` or `/dev/dri/card1`) | VAAPI (`hevc_vaapi`) |
+| NVIDIA | `/dev/nvidia0`, `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools` | NVENC (`hevc_nvenc`) |
+
+In unprivileged LXC, visibility of device files is not enough. You must also ensure the sqzarr service process has a supplementary group matching the mapped device group.
+
+## Linux GPU Device Primer (All Container Runtimes)
+
+- **Intel and AMD (VAAPI):** both use `/dev/dri` nodes
+   - required: `/dev/dri/renderD128`
+   - sometimes needed: `/dev/dri/card0` or `/dev/dri/card1`
+- **NVIDIA (NVENC/CUDA):** uses `/dev/nvidia*` nodes
+   - usually needed: `/dev/nvidia0`, `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`
+   - userspace libraries must be present in the container runtime environment (CUDA/NVENC libs)
+
 ## Proxmox LXC Containers (Unprivileged)
 
 ### Prerequisites
@@ -20,119 +39,110 @@ If hardware devices are not available or passed through to your container, SQZAR
 
 ### Configuration
 
-1. **Add device mapping in Proxmox UI:**
-   - Open the container configuration
-   - Go to **Resources** tab
-   - Scroll to bottom; click **Add** → **Device** (if available)
-   - OR edit the container config directly:
+1. **Edit `/etc/pve/nodes/{nodename}/lxc/{vmid}.conf` on the Proxmox host:**
 
-2. **Edit `/etc/pve/nodes/{nodename}/lxc/{vmid}.conf`:**
-   ```
-   # Enable nesting and FUSE for unprivileged container
-   features: nesting=1,fuse=1
-   
-   # Pass through GPU device
-   dev0: /dev/dri/renderD128,allow_cgroup_access=1
-   ```
+   Intel/AMD VAAPI example:
 
-3. **Fix permissions (host-side):**
-   ```bash
-   # Ensure render device is readable
-   ls -la /dev/dri/renderD128
-   # Should be: crw-rw---- 1 root video
-   ```
+       features: nesting=1
+       lxc.mount.entry: /dev/dri/ dev/dri/ none bind,optional,create=dir
+       lxc.cgroup2.devices.allow: c 226:* rwm
 
-4. **Restart the container:**
-   ```bash
-   # From Proxmox host
-   pct reboot {vmid}
-   ```
+   NVIDIA NVENC example:
 
-5. **Verify device is available inside container:**
-   ```bash
-   # From inside container
-   ls -la /dev/dri/renderD128
-   # If missing, device pass-through failed
-   ```
+       features: nesting=1
+       lxc.mount.entry: /dev/nvidia0 dev/nvidia0 none bind,optional,create=file
+       lxc.mount.entry: /dev/nvidiactl dev/nvidiactl none bind,optional,create=file
+       lxc.mount.entry: /dev/nvidia-uvm dev/nvidia-uvm none bind,optional,create=file
+       lxc.mount.entry: /dev/nvidia-uvm-tools dev/nvidia-uvm-tools none bind,optional,create=file
+       lxc.cgroup2.devices.allow: c 195:* rwm
+       lxc.cgroup2.devices.allow: c 511:* rwm
+
+   Notes:
+   - The old `dev0: ...,allow_cgroup_access=1` syntax is not accepted on newer Proxmox schema versions.
+   - Use `lxc.mount.entry` plus `lxc.cgroup2.devices.allow` for predictable behavior.
+
+2. **Restart container:**
+
+       pct stop {vmid}
+       pct start {vmid}
+
+3. **Verify device visibility inside container:**
+
+       ls -la /dev/dri
+       ls -la /dev/nvidia* 2>/dev/null || true
+
+4. **Verify actual access (not just visibility):**
+
+       head -c 1 /dev/dri/renderD128 >/dev/null && echo ok || echo fail
 
 ### Troubleshooting Unprivileged LXC
 
 **Device not visible in container:**
 - Ensure `features: nesting=1` is set
-- Check that the device path is correct (`renderD128` for Intel, not `renderD0`)
-- Verify host permissions: `ls -la /dev/dri/*`
-- Try adding `raw.lxc: lxc.mount.auto = proc sys cgroup` to container config
+- Check that the device path is correct (`renderD128` for Intel/AMD VAAPI)
+- Verify host permissions: `ls -la /dev/dri/*` or `ls -la /dev/nvidia*`
 
-**"Permission denied" errors:**
-- Add the container user to the `video` group
-- Or add `lxc.cgroup2.devices.allow: c 226:* rwm` to raw LXC config
+**Device visible but still permission denied (common in unprivileged LXC):**
+- Check numeric ownership inside container:
+
+         ls -ln /dev/dri/renderD128
+
+- In unprivileged containers, host GIDs are remapped. The effective group may not be `video` or `render` by name.
+- Run SQZARR with a supplementary group matching the mapped device GID.
+
+   Example if mapped group is `postdrop` (gid 104):
+
+         # /etc/systemd/system/sqzarr.service
+         User=root
+         Group=root
+         SupplementaryGroups=postdrop
+
+         systemctl daemon-reload
+         systemctl restart sqzarr
+
+- Re-check startup logs for VAAPI detection after restart.
 
 **VAAPI detection fails but device is present:**
-- Install VAAPI driver on host: `apt-get install intel-media-driver i965-va-driver libva-drm2`
-- Verify with `vainfo` on host
-- Container inherits driver access automatically
+- Intel iGPU: install Intel VAAPI driver on host and verify host-side with `vainfo`
+- AMD iGPU/dGPU: install Mesa VAAPI stack on host and verify host-side with `vainfo`
+- Then verify inside the container by probing ffmpeg VAAPI init.
 
-## Docker Containers
+## Other OCI Runtimes (Generic)
 
-### Docker with VAAPI (Intel/AMD)
+For OCI-compatible runtimes, the same rule applies:
+- pass through `/dev/dri/*` for Intel/AMD VAAPI
+- pass through `/dev/nvidia*` for NVIDIA NVENC/CUDA
+- ensure container process group membership matches device group ownership
 
-```bash
-docker run \
-  --device /dev/dri/renderD128 \
-  --device /dev/dri/card0 \
-  --group-add video \
-  -e SQZARR_LOG_LEVEL=debug \
-  sqzarr:latest
-```
+Example shape (runtime-agnostic):
 
-- `--device /dev/dri/renderD128` — render device (required for encoding)
-- `--device /dev/dri/card0` — card device (may be needed for some drivers)
-- `--group-add video` — allow access to video group
+      --device /dev/dri/renderD128
+      --device /dev/dri/card0
+      --group-add <mapped-video-group>
 
-### Docker with NVENC (NVIDIA)
+NVIDIA example shape:
 
-```bash
-docker run \
-  --gpus all \
-  -e SQZARR_LOG_LEVEL=debug \
-  sqzarr:latest
-```
-
-Or specify GPU:
-```bash
-docker run \
-  --gpus device=0 \
-  -e SQZARR_LOG_LEVEL=debug \
-  sqzarr:latest
-```
-
-Requires NVIDIA Container Runtime. Install:
-```bash
-# Ubuntu/Debian
-curl https://get.docker.com | sh
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | apt-key add -
-apt-get update && apt-get install -y nvidia-docker2
-systemctl restart docker
-```
+      --device /dev/nvidia0
+      --device /dev/nvidiactl
+      --device /dev/nvidia-uvm
+      --device /dev/nvidia-uvm-tools
 
 ## Verifying Hardware Encoder Selection
 
 Check the startup logs to see which encoder was selected:
 
-```bash
-# Tail the container logs
-docker logs -f sqzarr_container  # Docker
-pct exec {vmid} journalctl -u sqzarr -f  # Proxmox LXC
+   # Proxmox LXC
+   pct exec {vmid} journalctl -u sqzarr -f
 
-# Look for lines like:
-# "encoder selection complete", "selected": "Intel VAAPI (hevc_vaapi)"
-```
+   # Look for lines like:
+   # "encoder available" type=vaapi
+   # "encoder selected" "Intel VAAPI (hevc_vaapi)"
 
 If you see "Software (libx265)", then:
 1. Hardware device was not detected
 2. Check device pass-through configuration (steps above)
 3. Verify ffmpeg has hardware encoder support: `ffmpeg -encoders | grep hevc`
+4. In unprivileged LXC, verify mapped group access for the device node and set `SupplementaryGroups` accordingly
 
 ## Fallback Behavior
 
@@ -156,15 +166,8 @@ For typical 1080p HEVC files on a modern i5 or i7, hardware encoding takes minut
 
 Enable debug logging for more detail:
 
-```bash
-# Docker
-docker run \
-  -e SQZARR_LOG_LEVEL=debug \
-  sqzarr:latest
-
-# Proxmox LXC
-pct exec {vmid} /bin/bash -c "SQZARR_LOG_LEVEL=debug /usr/local/bin/sqzarr serve"
-```
+      # Proxmox LXC
+      pct exec {vmid} /bin/bash -c "SQZARR_LOG_LEVEL=debug /usr/local/bin/sqzarr serve"
 
 Debug logs show:
 - All encoders probed and their results
@@ -175,5 +178,5 @@ Debug logs show:
 ## Further Reading
 
 - [VAAPI Documentation](https://github.com/intel/media-driver)
-- [NVIDIA Container Runtime](https://github.com/NVIDIA/nvidia-docker)
+- [NVIDIA Video Codec SDK](https://developer.nvidia.com/video-codec-sdk)
 - [FFmpeg Hardware Encoding](https://trac.ffmpeg.org/wiki/Encode/HEVC)

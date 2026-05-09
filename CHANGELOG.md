@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-09
+
+### Bug fixes
+- **Robust hardware encoder detection and fallback** — NVENC probing now validates CUDA device initialization, VAAPI probing is hardened, and failed hardware transcodes automatically retry with software encoding to avoid hard job failures (TKT-011)
+- **Clearer hardware diagnostics in logs** — startup logging now reports detected/selected encoders more explicitly, making container misconfiguration easier to diagnose (TKT-011)
+
+### Deployment improvements
+- **Container passthrough guide expanded** — added generic GPU passthrough guidance for Intel, AMD, and NVIDIA, including unprivileged LXC mapped-group troubleshooting and service `SupplementaryGroups` guidance for `/dev/dri` access (TKT-011)
+
 ## 2026-04-09
 
 ### New features

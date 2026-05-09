@@ -195,6 +195,18 @@ func probeNVENC() *Encoder {
 	if err != nil || !containsBytes(out, []byte("hevc_nvenc")) {
 		return nil
 	}
+
+	// Test CUDA device availability (not just encoder availability)
+	probe := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-init_hw_device", "cuda=0",
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-c:v", "hevc_h264", // Dummy encoder, just testing device
+		"-frames:v", "1",
+		"-f", "null", "-")
+	if probe.Run() != nil {
+		return nil
+	}
+
 	return nvencEncoder()
 }
 

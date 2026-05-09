@@ -25,6 +25,8 @@ Self-hosted GPU-accelerated media transcoder. Scans your library, finds files th
 - **macOS:** `ffmpeg` 4.x+ (Homebrew: `brew install ffmpeg`)
 - `ffprobe` on PATH (included with ffmpeg)
 
+For detailed GPU passthrough guidance in containers (Intel, AMD, NVIDIA), see [docs/container-deployment.md](docs/container-deployment.md).
+
 ---
 
 ## Proxmox LXC Setup (Intel VAAPI)

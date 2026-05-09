@@ -3,6 +3,7 @@ package transcoder
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os/exec"
 )
 
@@ -10,10 +11,10 @@ import (
 type EncoderType string
 
 const (
-	EncoderVAAPI         EncoderType = "vaapi"
-	EncoderVideoToolbox  EncoderType = "videotoolbox"
-	EncoderNVENC         EncoderType = "nvenc"
-	EncoderSoftware      EncoderType = "software"
+	EncoderVAAPI        EncoderType = "vaapi"
+	EncoderVideoToolbox EncoderType = "videotoolbox"
+	EncoderNVENC        EncoderType = "nvenc"
+	EncoderSoftware     EncoderType = "software"
 )
 
 // Encoder holds a detected encoder and the ffmpeg flags needed to invoke it.
@@ -37,6 +38,39 @@ func Detect() (*Encoder, error) {
 		return enc, nil
 	}
 	return softwareEncoder(), nil
+}
+
+// DetectWithLogging probes the system and returns the best available encoder.
+// It logs detailed information about each probe attempt for diagnostics.
+func DetectWithLogging(log *slog.Logger) (*Encoder, error) {
+	log.Info("Starting hardware encoder detection")
+
+	probes := []struct {
+		name   string
+		detect func(*slog.Logger) *Encoder
+	}{
+		{"VAAPI (Intel/AMD)", func(l *slog.Logger) *Encoder { return probeVAAPIWithLogging(l) }},
+		{"VideoToolbox (Apple)", func(l *slog.Logger) *Encoder { return probeVideoToolboxWithLogging(l) }},
+		{"NVENC (NVIDIA)", func(l *slog.Logger) *Encoder { return probeNVENCWithLogging(l) }},
+	}
+
+	var selected *Encoder
+	for _, p := range probes {
+		enc := p.detect(log)
+		if enc != nil {
+			selected = enc
+			log.Info("Hardware encoder available", "encoder", p.name)
+			break
+		}
+	}
+
+	if selected == nil {
+		selected = softwareEncoder()
+		log.Info("No hardware encoders available, using software fallback")
+	}
+
+	log.Info("Encoder selection complete", "selected", selected.DisplayName)
+	return selected, nil
 }
 
 // DetectAll probes every encoder independently and returns all that are
@@ -100,6 +134,37 @@ func probeVAAPI() *Encoder {
 	return vaapiEncoder()
 }
 
+func probeVAAPIWithLogging(log *slog.Logger) *Encoder {
+	log.Debug("Probing VAAPI encoder", "device", "/dev/dri/renderD128")
+
+	// Check hevc_vaapi availability
+	out, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output()
+	if err != nil {
+		log.Debug("Failed to query ffmpeg encoders", "error", err)
+		return nil
+	}
+	if !containsBytes(out, []byte("hevc_vaapi")) {
+		log.Debug("VAAPI encoder hevc_vaapi not found in ffmpeg")
+		return nil
+	}
+
+	// Test device availability
+	probe := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-init_hw_device", "vaapi=va:/dev/dri/renderD128",
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-vf", "format=nv12,hwupload",
+		"-c:v", "hevc_vaapi",
+		"-frames:v", "1",
+		"-f", "null", "-")
+	if err := probe.Run(); err != nil {
+		log.Debug("VAAPI device test failed", "device", "/dev/dri/renderD128", "error", err)
+		return nil
+	}
+
+	log.Debug("VAAPI probe successful")
+	return vaapiEncoder()
+}
+
 func probeVideoToolbox() *Encoder {
 	out, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output()
 	if err != nil || !containsBytes(out, []byte("hevc_videotoolbox")) {
@@ -108,11 +173,58 @@ func probeVideoToolbox() *Encoder {
 	return videoToolboxEncoder()
 }
 
+func probeVideoToolboxWithLogging(log *slog.Logger) *Encoder {
+	log.Debug("Probing VideoToolbox encoder")
+
+	out, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output()
+	if err != nil {
+		log.Debug("Failed to query ffmpeg encoders", "error", err)
+		return nil
+	}
+	if !containsBytes(out, []byte("hevc_videotoolbox")) {
+		log.Debug("VideoToolbox encoder hevc_videotoolbox not found in ffmpeg")
+		return nil
+	}
+
+	log.Debug("VideoToolbox probe successful")
+	return videoToolboxEncoder()
+}
+
 func probeNVENC() *Encoder {
 	out, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output()
 	if err != nil || !containsBytes(out, []byte("hevc_nvenc")) {
 		return nil
 	}
+	return nvencEncoder()
+}
+
+func probeNVENCWithLogging(log *slog.Logger) *Encoder {
+	log.Debug("Probing NVENC encoder")
+
+	// Check hevc_nvenc availability
+	out, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").Output()
+	if err != nil {
+		log.Debug("Failed to query ffmpeg encoders", "error", err)
+		return nil
+	}
+	if !containsBytes(out, []byte("hevc_nvenc")) {
+		log.Debug("NVENC encoder hevc_nvenc not found in ffmpeg")
+		return nil
+	}
+
+	// Test CUDA device availability
+	probe := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error",
+		"-init_hw_device", "cuda=0",
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-c:v", "hevc_h264", // Dummy encoder, just testing device
+		"-frames:v", "1",
+		"-f", "null", "-")
+	if err := probe.Run(); err != nil {
+		log.Debug("NVENC CUDA device test failed", "error", err)
+		return nil
+	}
+
+	log.Debug("NVENC probe successful")
 	return nvencEncoder()
 }
 
@@ -168,7 +280,6 @@ func nvencEncoder() *Encoder {
 		BuildArgs: func(inputPath, outputPath string) []string {
 			return []string{
 				"-y",
-				"-hwaccel", "cuda",
 				"-i", inputPath,
 				"-c:v", "hevc_nvenc",
 				"-preset", "p4",

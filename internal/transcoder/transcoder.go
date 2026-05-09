@@ -46,7 +46,35 @@ func (t *Transcoder) SetEncoder(enc *Encoder) {
 // Run transcodes inputPath to a temp file, returning the temp output path.
 // The caller is responsible for verifying and renaming the output.
 // onLog, if non-nil, is called with each non-metric stderr line (startup info, warnings, errors).
+// If the current encoder fails with a device-related error, automatically retries with software encoding.
 func (t *Transcoder) Run(ctx context.Context, inputPath string, duration float64, onProgress ProgressFunc, onLog func(string)) (outputPath string, err error) {
+	outputPath, err = t.run(ctx, inputPath, duration, onProgress, onLog)
+
+	// Check if error is device-related and current encoder is not already software
+	if err != nil && t.encoder.Type != EncoderSoftware && isDeviceError(err) {
+		t.log.Warn("Hardware encoder failed with device error, retrying with software encoder",
+			"original_error", err,
+			"encoder", t.encoder.DisplayName)
+
+		// Clean up the failed output file
+		os.Remove(outputPath)
+
+		// Switch to software encoder and retry
+		originalEncoder := t.encoder
+		t.encoder = softwareEncoder()
+		defer func() { t.encoder = originalEncoder }() // Restore original after retry
+
+		outputPath, err = t.run(ctx, inputPath, duration, onProgress, onLog)
+		if err == nil {
+			t.log.Info("Software encoder fallback succeeded")
+		}
+	}
+
+	return outputPath, err
+}
+
+// run performs the actual ffmpeg transcoding. It's separated to allow retries with fallback.
+func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64, onProgress ProgressFunc, onLog func(string)) (outputPath string, err error) {
 	outputPath = t.tempOutputPath(inputPath)
 
 	// Ensure temp dir exists.
@@ -196,6 +224,36 @@ func ffmpegDiagnostic(lines []string) string {
 		diag = diag[len(diag)-30:]
 	}
 	return strings.Join(diag, "\n")
+}
+
+// isDeviceError checks if an error message indicates a hardware device issue.
+// These errors typically trigger a fallback to software encoding.
+func isDeviceError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+	devicePatterns := []string{
+		"cannot load",
+		"could not dynamically load",
+		"device creation failed",
+		"no device available",
+		"hardware device setup failed",
+		"permission denied",
+		"/dev/dri",
+		"cuda",
+		"vaapi",
+		"device not found",
+	}
+
+	for _, pattern := range devicePatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // rebuildWithProgress inserts -progress pipe:2 into the args before the final output path.

@@ -301,8 +301,8 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "job not found", http.StatusNotFound)
 		return
 	}
-	if job.Status != db.JobFailed && job.Status != db.JobCancelled {
-		jsonError(w, "only failed or cancelled jobs can be retried", http.StatusBadRequest)
+	if job.Status != db.JobFailed && job.Status != db.JobCancelled && job.Status != db.JobError {
+		jsonError(w, "only failed, error, or cancelled jobs can be retried", http.StatusBadRequest)
 		return
 	}
 	s.db.UpdateJobStatus(id, db.JobPending, "")

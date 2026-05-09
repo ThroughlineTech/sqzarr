@@ -208,6 +208,54 @@ func abs64(n int64) int64 {
 	return n
 }
 
+func TestRetryJob(t *testing.T) {
+	srv, database := newTestServer(t)
+
+	insertJob := func(status db.JobStatus) int64 {
+		id, err := database.InsertJob(&db.Job{
+			SourcePath:     "/media/Videos/test.mkv",
+			SourceSize:     100,
+			SourceCodec:    "h264",
+			SourceDuration: 30,
+			SourceBitrate:  8_000_000,
+			Status:         db.JobPending,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status != db.JobPending {
+			if err := database.UpdateJobStatus(id, status, "test error"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id
+	}
+
+	retryable := []db.JobStatus{db.JobFailed, db.JobError, db.JobCancelled}
+	for _, status := range retryable {
+		id := insertJob(status)
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/jobs/%d/retry", id), nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status %q: expected 204, got %d: %s", status, w.Code, w.Body.String())
+		}
+		job, _ := database.GetJob(id)
+		if job.Status != db.JobPending {
+			t.Errorf("status %q: expected job to be pending after retry, got %s", status, job.Status)
+		}
+	}
+
+	// Non-retryable status must return 400.
+	id := insertJob(db.JobDone)
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/jobs/%d/retry", id), nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("done job: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestBatchCreateDirectories(t *testing.T) {
 	srv, database := newTestServer(t)
 

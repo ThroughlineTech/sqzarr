@@ -305,14 +305,16 @@ export function Queue() {
             setSubmitting(true)
             setSubmitError(null)
             setSubmitSuccess(false)
-            let failed = 0
+            const failures: string[] = []
             for (const path of paths) {
               try { await api.createJob(path) }
-              catch { failed++ }
+              catch (err: any) { failures.push(err.message || 'unknown error') }
             }
             setSubmitting(false)
-            if (failed > 0) {
-              setSubmitError(`${failed} file${failed > 1 ? 's' : ''} failed to queue`)
+            if (failures.length > 0) {
+              const reasons = [...new Set(failures)]
+              const reasonText = reasons.length === 1 ? reasons[0] : reasons.join('; ')
+              setSubmitError(`${failures.length} file${failures.length > 1 ? 's' : ''} failed to queue: ${reasonText}`)
             } else {
               setSubmitSuccess('Added to queue')
               setTimeout(() => setSubmitSuccess(false), 3000)

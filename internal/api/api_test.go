@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,6 +85,54 @@ func TestJobsEndpoint(t *testing.T) {
 	srv.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusOK {
 		t.Errorf("expected 200 from GET /jobs, got %d", w2.Code)
+	}
+}
+
+// TestQueueFileUnderRootDirNotRegisteredAsScanDirectory covers a real
+// production bug: a file picked from the browser (scoped to
+// cfg.Scanner.RootDirs, e.g. "/media/Videos") failed to queue whenever its
+// containing folder (e.g. "/media/Videos/Home Videos") hadn't separately
+// been registered as an automated scan directory in the directories table.
+// Anything the browser can show should be queueable.
+func TestQueueFileUnderRootDirNotRegisteredAsScanDirectory(t *testing.T) {
+	database := testutil.NewTestDB(t)
+
+	root := t.TempDir()
+	homeVideos := filepath.Join(root, "Home Videos")
+	if err := os.MkdirAll(homeVideos, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Register an unrelated sibling directory as a scan directory, but not
+	// homeVideos itself — mirrors the production directories table, which
+	// had Backlog/Kids Movies/etc. registered but not Home Videos.
+	other := filepath.Join(root, "Other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.InsertDirectory(&db.Directory{Path: other, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults()
+	cfg.Scanner.RootDirs = []string{root}
+	cfg.Server.DataDir = t.TempDir()
+	cfg.Auth.JWTSecret = "test-secret"
+	log := slog.Default()
+	enc := &transcoder.Encoder{Type: transcoder.EncoderSoftware, DisplayName: "test",
+		BuildArgs: func(in, out string) []string { return nil }}
+	tc := transcoder.New(enc, "", log)
+	worker := queue.New(database, cfg, tc, nil, log)
+	scan := scanner.New(database, cfg.Safety.ProcessedDirName, log)
+	srv := api.New(cfg, "", database, worker, scan, nil, enc, []*transcoder.Encoder{enc}, tc, log)
+
+	body, _ := json.Marshal(map[string]string{"path": filepath.Join(homeVideos, "Brooklyn_Tour.mkv")})
+	req := httptest.NewRequest("POST", "/api/v1/jobs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

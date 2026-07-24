@@ -5,6 +5,7 @@ import { Queue } from './pages/Queue'
 import { History } from './pages/History'
 import { Directories } from './pages/Directories'
 import { Review } from './pages/Review'
+import { Logs } from './pages/Logs'
 import { Settings } from './pages/Settings'
 import { Login } from './pages/Login'
 import { SpaceSaved } from './pages/SpaceSaved'
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
       { path: '/history', element: <History /> },
       { path: '/directories', element: <Directories /> },
       { path: '/review', element: <Review /> },
+      { path: '/logs', element: <Logs /> },
       { path: '/settings', element: <Settings /> },
       { path: '/savings', element: <SpaceSaved /> },
       { path: '*', element: <Navigate to="/" replace /> },

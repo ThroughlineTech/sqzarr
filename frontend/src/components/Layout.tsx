@@ -6,6 +6,7 @@ import {
   Clock,
   FolderOpen,
   Archive,
+  FileText,
   Settings,
   PauseCircle,
   Play,
@@ -49,6 +50,7 @@ function LayoutInner() {
     { to: '/history',     label: 'History',    icon: Clock,           badge: 0 },
     { to: '/directories', label: 'Directories', icon: FolderOpen,     badge: 0 },
     { to: '/review',      label: 'Review',     icon: Archive,         badge: originalsCount },
+    { to: '/logs',        label: 'Logs',       icon: FileText,        badge: 0 },
     { to: '/settings',    label: 'Settings',   icon: Settings,        badge: 0 },
   ]
 

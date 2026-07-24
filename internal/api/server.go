@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,7 @@ type Server struct {
 	transcoder        *transcoder.Transcoder
 	hub               *wsHub
 	log               *slog.Logger
+	logPath           string
 	httpServer        *http.Server
 	sys               sysSample
 	mu                sync.Mutex // guards encoder hot-swap
@@ -83,6 +85,7 @@ func New(
 		transcoder:        tc,
 		hub:               newWSHub(),
 		log:               log,
+		logPath:           filepath.Join(cfg.Server.DataDir, "sqzarr.log"),
 	}
 
 	// Subscribe worker events to WebSocket hub; also persist auto-pause to config.
@@ -159,6 +162,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Filesystem browser (for directory picker)
 	api.HandleFunc("GET /fs", s.handleBrowseFS)
+
+	// Logs (persistent application log, backs the in-app Logs tab)
+	api.HandleFunc("GET /logs", s.handleGetLogs)
+	api.HandleFunc("POST /logs/clear", s.handleClearLogs)
 
 	// WebSocket
 	api.HandleFunc("GET /ws", s.handleWebSocket)

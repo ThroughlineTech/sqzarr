@@ -67,17 +67,20 @@ func main() {
 }
 
 func runServe(cfgPath string) {
-	log := logger.New()
-
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Error("load config", "error", err)
+		fmt.Fprintln(os.Stderr, "load config:", err)
 		os.Exit(1)
 	}
 
 	if err := os.MkdirAll(cfg.Server.DataDir, 0o750); err != nil {
-		log.Error("create data dir", "error", err)
+		fmt.Fprintln(os.Stderr, "create data dir:", err)
 		os.Exit(1)
+	}
+
+	log, logErr := logger.New(filepath.Join(cfg.Server.DataDir, "sqzarr.log"))
+	if logErr != nil {
+		log.Warn("open log file, continuing with stdout-only logging", "error", logErr)
 	}
 
 	database, err := db.Open(cfg.DBPath())
@@ -158,7 +161,7 @@ func runServe(cfgPath string) {
 }
 
 func runScanOnce(cfgPath string, dryRun bool) {
-	log := logger.New()
+	log, _ := logger.New("")
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -205,7 +208,7 @@ func runScanOnce(cfgPath string, dryRun bool) {
 }
 
 func runRestore(cfgPath string, jobIDStr string) {
-	log := logger.New()
+	log, _ := logger.New("")
 
 	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
 	if err != nil {

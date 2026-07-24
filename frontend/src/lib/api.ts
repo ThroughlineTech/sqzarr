@@ -225,6 +225,10 @@ export const api = {
   getJobLog: (id: number, n = 20) =>
     request<{ lines: string[] }>('GET', `/jobs/${id}/log?n=${n}`),
 
+  getLogs: (n = 1000) =>
+    request<{ lines: string[] }>('GET', `/logs?n=${n}`),
+  clearLogs: () => request<{ status: string }>('POST', '/logs/clear'),
+
   browseFS: (path: string | undefined, files = false, unrestricted = false) => {
     const params = new URLSearchParams({ files: files ? '1' : '0' })
     if (path) params.set('path', path)

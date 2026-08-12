@@ -10,3 +10,19 @@ dist/
 
 # Local deploy script overrides
 deploy.local.sh
+
+# Throughline Build (managed by 'build setup')
+.build/conductor.toml
+.build/sop-manifest.json
+.build/profile.json
+.build/invariants.toml
+.build/*.md
+.build/events/
+.build/sessions/
+secrets/
+.tmp/
+.DS_Store
+Thumbs.db
+.vs/
+.idea/
+*.swp

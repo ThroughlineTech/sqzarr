@@ -5,6 +5,7 @@
 # [events].
 
 [ticketing]
+plane_api_token_file = "secrets/plane-api-token"
 backend = "plane"
 plane_base_url = "https://plane.throughlinetech.net/"  # REQUIRED: set to your Plane API base URL (e.g. https://api.plane.so)
 plane_workspace_slug = "throughline"  # REQUIRED: your workspace slug

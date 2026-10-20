@@ -42,6 +42,7 @@ func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
 // tailFile returns up to the last n newline-delimited lines of path, reading
 // at most maxLogReadBytes from the end of the file.
 func tailFile(path string, n int) ([]string, error) {
+	// #nosec G304 -- callers pass the fixed application log path, never a request path.
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {

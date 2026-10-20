@@ -16,7 +16,11 @@ func NewTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("testutil: open db: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	return database
 }
 
@@ -31,6 +35,7 @@ func MakeTestClip(t *testing.T, dir string, durationSecs int) string {
 	}
 
 	path := filepath.Join(dir, "test.mkv")
+	// #nosec G204 -- test fixture uses a fixed executable, numeric duration and test-owned output path; no shell.
 	cmd := exec.Command("ffmpeg", "-y",
 		"-f", "lavfi",
 		"-i", "testsrc=duration="+strconv.Itoa(durationSecs)+":size=640x480:rate=25",

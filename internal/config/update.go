@@ -32,6 +32,7 @@ var keySection = map[string]string{
 // All other content (comments, blank lines, other settings) is preserved.
 // Missing keys are inserted into the correct TOML section (not appended to the end).
 func UpdateFile(path string, updates map[string]string) error {
+	// #nosec G304 -- path is the operator-selected config file from startup, never a request field.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read config file: %w", err)
@@ -77,5 +78,10 @@ func UpdateFile(path string, updates map[string]string) error {
 		}
 	}
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	// Restrict existing files too: WriteFile's mode only applies on creation.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("restrict config permissions: %w", err)
+	}
+	// #nosec G703 -- HTTP updates supply values; the destination is the fixed startup config path.
+	return os.WriteFile(path, []byte(content), 0o600)
 }

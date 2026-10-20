@@ -132,7 +132,7 @@ export function History() {
                   </div>
                   <StatusBadge status={job.Status} />
                   {job.EncoderUsed?.Valid && /software|libx265/i.test(job.EncoderUsed.String) && (
-                    <span className="text-xs bg-amber-100 text-amber-700 font-medium px-1.5 py-0.5 rounded shrink-0" title="Fell back to software encode — GPU was not used">
+                    <span className="text-xs bg-amber-100 text-amber-700 font-medium px-1.5 py-0.5 rounded-sm shrink-0" title="Fell back to software encode — GPU was not used">
                       SW
                     </span>
                   )}
@@ -204,7 +204,7 @@ export function History() {
                     })()}
                     {errMsg && (
                       <div className="mt-1">
-                        <pre className="whitespace-pre-wrap break-all text-red-600 bg-red-50 border border-red-100 rounded p-2 font-mono text-xs max-h-48 overflow-y-auto">
+                        <pre className="whitespace-pre-wrap break-all text-red-600 bg-red-50 border border-red-100 rounded-sm p-2 font-mono text-xs max-h-48 overflow-y-auto">
                           {errMsg}
                         </pre>
                       </div>

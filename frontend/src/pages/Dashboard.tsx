@@ -338,7 +338,7 @@ export function Dashboard() {
             </p>
           )}
           {logLines.length > 0 && (
-            <pre className="mt-3 p-2 bg-stone-50 rounded text-[10px] leading-relaxed text-stone-500 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap break-all">
+            <pre className="mt-3 p-2 bg-stone-50 rounded-sm text-[10px] leading-relaxed text-stone-500 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap break-all">
               {logLines.join('\n')}
             </pre>
           )}

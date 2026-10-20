@@ -101,31 +101,31 @@ function SettingsFields({ s, onChange }: { s: Settings; onChange: (s: Settings) 
           <span className="text-xs font-medium text-stone-600">Min age (days)</span>
           <input type="number" min={0} value={s.min_age_days}
             onChange={e => onChange({ ...s, min_age_days: Number(e.target.value) })}
-            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
         </label>
         <label className="block">
           <span className="text-xs font-medium text-stone-600">Max bitrate (bps)</span>
           <input type="number" min={0} value={s.max_bitrate}
             onChange={e => onChange({ ...s, max_bitrate: Number(e.target.value) })}
-            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
         </label>
         <label className="block">
           <span className="text-xs font-medium text-stone-600">Skip margin (%)</span>
           <input type="number" min={0} max={100} step={1}
             value={Math.round(s.bitrate_skip_margin * 100)}
             onChange={e => onChange({ ...s, bitrate_skip_margin: Number(e.target.value) / 100 })}
-            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
         </label>
         <label className="block">
           <span className="text-xs font-medium text-stone-600">Min size (MB)</span>
           <input type="number" min={0} value={s.min_size_mb}
             onChange={e => onChange({ ...s, min_size_mb: Number(e.target.value) })}
-            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+            className="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
         </label>
       </div>
       <label className="flex items-center gap-2 cursor-pointer">
         <input type="checkbox" checked={s.enabled} onChange={e => onChange({ ...s, enabled: e.target.checked })}
-          className="rounded border-stone-300 text-amber-600 focus:ring-amber-500" />
+          className="rounded-sm border-stone-300 text-amber-600 focus:ring-amber-500" />
         <span className="text-sm text-stone-700">Enabled</span>
       </label>
     </>
@@ -177,7 +177,7 @@ function EditCard({ dir, onSave, onCancel }: {
       <div className="bg-white border-2 border-amber-300 rounded-lg p-4 space-y-3">
         <div className="flex gap-2">
           <input type="text" value={path} onChange={e => setPath(e.target.value)}
-            className="flex-1 min-w-0 rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+            className="flex-1 min-w-0 rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
           <button type="button" onClick={() => setShowBrowser(true)}
             className="shrink-0 flex items-center px-3 py-2 text-sm border border-stone-300 rounded-md text-stone-600 hover:bg-stone-50 transition-colors">
             <FolderOpen size={14} />
@@ -311,7 +311,7 @@ export function Directories() {
                 <input type="text" value={path}
                   onChange={e => setPath(i, e.target.value)}
                   placeholder="/media/Videos/Movies"
-                  className="flex-1 min-w-0 rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-none" />
+                  className="flex-1 min-w-0 rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-500 focus:outline-hidden" />
                 <button type="button" onClick={() => setBrowserForIndex(i)}
                   className="shrink-0 flex items-center px-3 py-2 text-sm border border-stone-300 rounded-md text-stone-600 hover:bg-stone-50 transition-colors"
                   title="Browse filesystem">
@@ -375,7 +375,7 @@ export function Directories() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {!d.Enabled && (
-                    <span className="text-xs text-stone-400 bg-stone-100 px-2 py-0.5 rounded">Disabled</span>
+                    <span className="text-xs text-stone-400 bg-stone-100 px-2 py-0.5 rounded-sm">Disabled</span>
                   )}
                   <button onClick={() => startAdd(d)}
                     className="text-stone-400 hover:text-amber-600 transition-colors"

@@ -101,7 +101,7 @@ function LayoutInner() {
             <button
               onClick={handleResume}
               disabled={resuming}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded transition-colors shrink-0"
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-sm transition-colors shrink-0"
             >
               <Play size={11} />
               {resuming ? 'Resuming…' : 'Resume'}

@@ -60,7 +60,7 @@ export function Login() {
               placeholder="Password"
               autoFocus
               required
-              className={`block w-full rounded-md border px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-1 ${
+              className={`block w-full rounded-md border px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:outline-hidden focus:ring-1 ${
                 error
                   ? 'border-red-400 focus:border-red-400 focus:ring-red-400'
                   : 'border-stone-300 focus:border-amber-500 focus:ring-amber-500'

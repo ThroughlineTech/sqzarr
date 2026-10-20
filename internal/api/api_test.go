@@ -17,8 +17,8 @@ import (
 	"github.com/danrichardson/sqzarr/internal/db"
 	"github.com/danrichardson/sqzarr/internal/queue"
 	"github.com/danrichardson/sqzarr/internal/scanner"
-	"github.com/danrichardson/sqzarr/internal/transcoder"
 	"github.com/danrichardson/sqzarr/internal/testutil"
+	"github.com/danrichardson/sqzarr/internal/transcoder"
 )
 
 func newTestServer(t *testing.T) (*api.Server, *db.DB) {
@@ -329,8 +329,8 @@ func TestBatchCreateDirectories(t *testing.T) {
 
 	t.Run("happy path", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"paths":       []string{dir1, dir2},
-			"enabled":     true,
+			"paths":        []string{dir1, dir2},
+			"enabled":      true,
 			"min_age_days": 14,
 			"max_bitrate":  3000000,
 			"min_size_mb":  200,
@@ -367,7 +367,7 @@ func TestBatchCreateDirectories(t *testing.T) {
 	t.Run("invalid path rolls back all", func(t *testing.T) {
 		dir3 := t.TempDir()
 		body, _ := json.Marshal(map[string]any{
-			"paths":       []string{dir3, "/nonexistent/path/abc123"},
+			"paths":        []string{dir3, "/nonexistent/path/abc123"},
 			"min_age_days": 5,
 		})
 		req := httptest.NewRequest("POST", "/api/v1/directories/batch", bytes.NewReader(body))

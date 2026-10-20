@@ -84,6 +84,9 @@ func New(database *db.DB, cfg *config.Config, enc *transcoder.Transcoder, plex P
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	if concurrency > 8 {
+		concurrency = 8
+	}
 	w.maxConcurrency.Store(int32(concurrency))
 	return w
 }
@@ -211,7 +214,9 @@ func (w *Worker) tick(ctx context.Context) error {
 			}
 			w.log.Warn("skipping job: insufficient temp space",
 				"job_id", job.ID, "path", job.SourcePath, "need", needed)
-			w.db.UpdateJobStatus(job.ID, db.JobSkipped, "insufficient temp space")
+			if err := w.db.UpdateJobStatus(job.ID, db.JobSkipped, "insufficient temp space"); err != nil {
+				return fmt.Errorf("skip job: %w", err)
+			}
 			continue
 		}
 
@@ -250,7 +255,9 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	w.log.Info("starting job", "job_id", job.ID, "source", job.SourcePath)
 
 	onProgress := func(p, speed, fps float64) {
-		w.db.UpdateJobProgress(job.ID, p)
+		if err := w.db.UpdateJobProgress(job.ID, p); err != nil {
+			w.log.Error("update job progress", "job_id", job.ID, "error", err)
+		}
 		w.emit(Event{Type: EventProgress, JobID: job.ID, Progress: p, Speed: speed, FPS: fps})
 	}
 	onLog := func(line string) { w.appendLog(job.ID, line) }
@@ -259,7 +266,7 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	if err != nil {
 		if ctx.Err() != nil {
 			w.log.Info("job cancelled", "job_id", job.ID)
-			w.db.UpdateJobStatus(job.ID, db.JobCancelled, "cancelled by user")
+			w.recordStatus(job.ID, db.JobCancelled, "cancelled by user")
 			w.emit(Event{Type: EventFailed, JobID: job.ID, Error: "cancelled"})
 		} else {
 			w.log.Error("transcode failed", "job_id", job.ID, "error", err)
@@ -271,20 +278,24 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	// Verify output before touching the original.
 	result, err := verifier.Verify(job.SourcePath, outputPath, 1.0)
 	if err != nil {
-		os.Remove(outputPath)
+		w.removeOutput(outputPath)
 		w.log.Error("verify error", "job_id", job.ID, "error", err)
 		w.handleFailure(job, err.Error())
 		return
 	}
 	if !result.OK {
-		os.Remove(outputPath)
+		w.removeOutput(outputPath)
 		w.log.Error("verify failed", "job_id", job.ID, "reason", result.Reason)
 		if result.Uncompressible {
 			// File won't benefit from re-encoding — exclude permanently.
-			w.db.ExcludeJob(job.ID, "uncompressible: "+result.Reason)
+			if err := w.db.ExcludeJob(job.ID, "uncompressible: "+result.Reason); err != nil {
+				w.log.Error("exclude job", "job_id", job.ID, "error", err)
+			}
 			// Durably record as excluded so it survives history clears.
 			if fi, serr := os.Stat(job.SourcePath); serr == nil {
-				w.db.UpsertProcessedFile(job.SourcePath, "excluded", "uncompressible: "+result.Reason, fi.Size(), fi.ModTime())
+				if err := w.db.UpsertProcessedFile(job.SourcePath, "excluded", "uncompressible: "+result.Reason, fi.Size(), fi.ModTime()); err != nil {
+					w.log.Error("record excluded file", "job_id", job.ID, "error", err)
+				}
 			}
 			w.emit(Event{Type: EventFailed, JobID: job.ID, Error: result.Reason})
 			return
@@ -296,8 +307,8 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	// Cancellation may arrive while output verification is running. Never
 	// stage a replacement for a job the user has already cancelled.
 	if ctx.Err() != nil {
-		os.Remove(outputPath)
-		w.db.UpdateJobStatus(job.ID, db.JobCancelled, "cancelled by user")
+		w.removeOutput(outputPath)
+		w.recordStatus(job.ID, db.JobCancelled, "cancelled by user")
 		w.emit(Event{Type: EventFailed, JobID: job.ID, Error: "cancelled"})
 		return
 	}
@@ -309,7 +320,7 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 
 	// Rename the temp output to the final codec-aware name.
 	if err := os.Rename(outputPath, finalOutputPath); err != nil {
-		os.Remove(outputPath)
+		w.removeOutput(outputPath)
 		w.log.Error("rename output failed", "job_id", job.ID, "error", err)
 		w.handleFailure(job, "rename output: "+err.Error())
 		return
@@ -319,7 +330,7 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	heldPath, err := w.moveToProcessed(job)
 	if err != nil {
 		// Rollback: remove the transcoded file we already placed.
-		os.Remove(finalOutputPath)
+		w.removeOutput(finalOutputPath)
 		w.log.Error("move to processed failed", "job_id", job.ID, "error", err)
 		w.handleFailure(job, "move to processed: "+err.Error())
 		return
@@ -421,21 +432,27 @@ func (w *Worker) handleFailure(job *db.Job, reason string) {
 			// I/O errors need human intervention — mark as error, not excluded.
 			w.log.Warn("marking job as error (I/O failure)",
 				"job_id", job.ID, "fail_count", failCount, "reason", reason)
-			w.db.UpdateJobStatus(job.ID, db.JobError, reason)
+			w.recordStatus(job.ID, db.JobError, reason)
 			if fi, serr := os.Stat(job.SourcePath); serr == nil {
-				w.db.UpsertProcessedFile(job.SourcePath, "error", reason, fi.Size(), fi.ModTime())
+				if err := w.db.UpsertProcessedFile(job.SourcePath, "error", reason, fi.Size(), fi.ModTime()); err != nil {
+					w.log.Error("record file error", "job_id", job.ID, "error", err)
+				}
 			}
 		} else {
 			w.log.Warn("excluding job after repeated failures",
 				"job_id", job.ID, "fail_count", failCount, "reason", reason)
-			w.db.ExcludeJob(job.ID, reason)
+			if err := w.db.ExcludeJob(job.ID, reason); err != nil {
+				w.log.Error("exclude job", "job_id", job.ID, "error", err)
+			}
 			// Durably record as excluded so it survives history clears.
 			if fi, serr := os.Stat(job.SourcePath); serr == nil {
-				w.db.UpsertProcessedFile(job.SourcePath, "excluded", reason, fi.Size(), fi.ModTime())
+				if err := w.db.UpsertProcessedFile(job.SourcePath, "excluded", reason, fi.Size(), fi.ModTime()); err != nil {
+					w.log.Error("record excluded file", "job_id", job.ID, "error", err)
+				}
 			}
 		}
 	} else {
-		w.db.UpdateJobStatus(job.ID, db.JobFailed, reason)
+		w.recordStatus(job.ID, db.JobFailed, reason)
 	}
 
 	w.emit(Event{Type: EventFailed, JobID: job.ID, Error: reason})
@@ -471,7 +488,7 @@ func (w *Worker) moveToProcessed(job *db.Job) (string, error) {
 	}
 	heldPath := filepath.Join(processedDir, rel)
 
-	if err := os.MkdirAll(filepath.Dir(heldPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(heldPath), 0o750); err != nil {
 		return "", fmt.Errorf("create processed dir: %w", err)
 	}
 	if err := os.Rename(job.SourcePath, heldPath); err != nil {
@@ -522,8 +539,32 @@ func hasTempSpace(sourcePath, tempDir string) (bool, error) {
 	if err := syscall.Statfs(checkDir, &stat); err != nil {
 		return true, nil // Can't check — don't block.
 	}
-	free := stat.Bavail * uint64(stat.Bsize)
-	return free >= needed, nil
+	return availableSpace(stat.Bavail, int64(stat.Bsize), needed)
+}
+
+// availableSpace compares block counts without overflowing a byte multiplication.
+func availableSpace(blocks uint64, blockSize int64, needed uint64) (bool, error) {
+	if blockSize <= 0 {
+		return false, fmt.Errorf("invalid filesystem block size: %d", blockSize)
+	}
+	size := uint64(blockSize)
+	requiredBlocks := needed / size
+	if needed%size != 0 {
+		requiredBlocks++
+	}
+	return blocks >= requiredBlocks, nil
+}
+
+func (w *Worker) recordStatus(jobID int64, status db.JobStatus, reason string) {
+	if err := w.db.UpdateJobStatus(jobID, status, reason); err != nil {
+		w.log.Error("update job status", "job_id", jobID, "status", status, "error", err)
+	}
+}
+
+func (w *Worker) removeOutput(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		w.log.Error("remove transcode output", "path", path, "error", err)
+	}
 }
 
 func (w *Worker) emit(e Event) {

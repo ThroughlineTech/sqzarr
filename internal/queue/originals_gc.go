@@ -9,7 +9,6 @@ import (
 	"github.com/danrichardson/sqzarr/internal/db"
 )
 
-
 // OriginalsGC runs as a background goroutine, deleting held original files
 // whose retention period has expired (every hour).
 type OriginalsGC struct {
@@ -57,7 +56,10 @@ func (gc *OriginalsGC) Sweep() {
 			gc.log.Error("originals GC: mark deleted", "id", r.ID, "error", err)
 			continue
 		}
-		gc.db.UpdateJobStatus(r.JobID, db.JobDone, "")
+		if err := gc.db.UpdateJobStatus(r.JobID, db.JobDone, ""); err != nil {
+			gc.log.Error("originals GC: update job status", "job_id", r.JobID, "error", err)
+			continue
+		}
 		gc.log.Info("original expired and deleted",
 			"held_path", r.HeldPath,
 			"job_id", r.JobID,

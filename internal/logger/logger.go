@@ -24,8 +24,13 @@ func New(logFilePath string) (*slog.Logger, error) {
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts)), nil
 	}
 
-	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	// #nosec G304 -- logFilePath is derived from the operator-configured data directory.
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return slog.New(slog.NewJSONHandler(os.Stdout, opts)), err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close() // Preserve the permission error; this logger falls back to stdout.
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts)), err
 	}
 	return slog.New(slog.NewJSONHandler(io.MultiWriter(os.Stdout, f), opts)), nil

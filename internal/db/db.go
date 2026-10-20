@@ -25,7 +25,7 @@ func Open(path string) (*DB, error) {
 
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
-		conn.Close()
+		_ = conn.Close() // Preserve the migration error while releasing the connection.
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return db, nil

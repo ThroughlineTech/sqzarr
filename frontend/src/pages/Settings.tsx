@@ -283,7 +283,7 @@ export function Settings() {
                 <select
                   value={selectedEncoder}
                   onChange={e => setSelectedEncoder(e.target.value)}
-                  className="w-56 text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                  className="w-56 text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-amber-400 bg-white"
                 >
                   {encoders.map(enc => (
                     <option key={enc.type} value={enc.type}>
@@ -306,7 +306,7 @@ export function Settings() {
                     </div>
                     <select id="hardware-decode" value={hardwareDecode}
                       onChange={e => setHardwareDecode(e.target.value as 'auto' | 'off')}
-                      className="w-56 text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
+                      className="w-56 text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-amber-400 bg-white">
                       <option value="auto">Automatic</option>
                       <option value="off">Off</option>
                     </select>
@@ -369,7 +369,7 @@ export function Settings() {
                     }
                   }}
                   placeholder="/mnt/Videos"
-                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-3 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-3 py-1.5 font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                 />
                 <button
                   type="button"
@@ -411,7 +411,7 @@ export function Settings() {
                   max={8}
                   value={concurrency}
                   onChange={e => setConcurrency(Number(e.target.value))}
-                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                 />
               </div>
               <p className="text-xs text-stone-400">1–8 parallel workers. Applied live — no restart needed.</p>
@@ -432,7 +432,7 @@ export function Settings() {
                     min={1}
                     value={intervalHours}
                     onChange={e => setIntervalHours(Number(e.target.value))}
-                    className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                   />
                   <span className="text-sm text-stone-500">hours</span>
                 </div>
@@ -455,7 +455,7 @@ export function Settings() {
                   type="text"
                   value={processedDirName}
                   onChange={e => setProcessedDirName(e.target.value)}
-                  className="w-36 text-sm border border-stone-300 rounded-md px-2 py-1 font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-36 text-sm border border-stone-300 rounded-md px-2 py-1 font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -469,7 +469,7 @@ export function Settings() {
                     min={1}
                     value={retentionDays}
                     onChange={e => setRetentionDays(Number(e.target.value))}
-                    className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                   />
                   <span className="text-sm text-stone-500">days</span>
                 </div>
@@ -484,7 +484,7 @@ export function Settings() {
                   min={1}
                   value={failThreshold}
                   onChange={e => setFailThreshold(Number(e.target.value))}
-                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -497,7 +497,7 @@ export function Settings() {
                   min={1}
                   value={systemFailThreshold}
                   onChange={e => setSystemFailThreshold(Number(e.target.value))}
-                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-20 text-sm border border-stone-300 rounded-md px-2 py-1 text-right focus:outline-hidden focus:ring-2 focus:ring-amber-400"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -549,7 +549,7 @@ export function Settings() {
                   onChange={e => setPlexURL(e.target.value)}
                   disabled={!plexEnabled || plexChecking}
                   placeholder="http://192.168.1.10:32400"
-                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
+                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-hidden focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
                 />
               </div>
               <div className="flex items-center justify-between gap-4">
@@ -560,7 +560,7 @@ export function Settings() {
                   onChange={e => setPlexToken(e.target.value)}
                   disabled={!plexEnabled || plexChecking}
                   placeholder={cfg.plex_token === 'SET' ? '●●●●●●●● (set)' : 'paste token here'}
-                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
+                  className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-hidden focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
                 />
               </div>
               <div className="space-y-2">
@@ -612,7 +612,7 @@ export function Settings() {
                 type="password"
                 value={currentPassword}
                 onChange={e => setCurrentPassword(e.target.value)}
-                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-amber-400"
               />
             </div>
             )}
@@ -622,7 +622,7 @@ export function Settings() {
                 type="password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-amber-400"
               />
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -631,7 +631,7 @@ export function Settings() {
                 type="password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
-                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="flex-1 min-w-0 max-w-xs text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-hidden focus:ring-2 focus:ring-amber-400"
               />
             </div>
             {confirmPassword && newPassword !== confirmPassword && (

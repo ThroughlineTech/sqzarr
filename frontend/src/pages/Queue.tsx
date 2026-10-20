@@ -34,7 +34,7 @@ function jobStatusPill(status: string | undefined) {
     skipped:   'bg-stone-100 text-stone-400',
   }
   return (
-    <span className={`text-[10px] px-1 py-0.5 rounded font-medium shrink-0 ${map[status] ?? 'bg-stone-100 text-stone-400'}`}>
+    <span className={`text-[10px] px-1 py-0.5 rounded-sm font-medium shrink-0 ${map[status] ?? 'bg-stone-100 text-stone-400'}`}>
       {status}
     </span>
   )
@@ -122,7 +122,7 @@ function FilePicker({ onSelect, onQueueDir, onClose }: { onSelect: (paths: strin
                 <button
                   key={k}
                   onClick={() => setSort(k)}
-                  className={`text-xs px-2 py-0.5 rounded transition-colors ${sort === k ? 'bg-stone-800 text-white' : 'text-stone-500 hover:bg-stone-100'}`}
+                  className={`text-xs px-2 py-0.5 rounded-sm transition-colors ${sort === k ? 'bg-stone-800 text-white' : 'text-stone-500 hover:bg-stone-100'}`}
                 >
                   {k}
                 </button>
@@ -356,7 +356,7 @@ export function Queue() {
             value={manualPath}
             onChange={e => setManualPath(e.target.value)}
             placeholder="/absolute/path/to/file.mkv"
-            className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-3 py-1.5 font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+            className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-3 py-1.5 font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-400"
           />
           <button
             type="button"

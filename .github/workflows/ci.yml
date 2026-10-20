@@ -5,51 +5,55 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.22'
+          go-version: '1.26'
           cache: true
 
       - name: Install ffmpeg
         run: sudo apt-get install -y ffmpeg
 
       - name: Go vet
-        run: go vet $(go list ./... | grep -v /frontend/)
+        run: go vet ./cmd/... ./internal/... ./scripts/...
 
       - name: Unit tests
-        run: go test $(go list ./... | grep -v /frontend/)
+        run: go test ./cmd/... ./internal/... ./scripts/...
 
       - name: Integration tests
-        run: go test -tags integration -v $(go list ./... | grep -v /frontend/)
+        run: go test -tags integration -v ./cmd/... ./internal/... ./scripts/...
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Frontend build
-        run: cd frontend && npm ci && npm run build
+      - name: Frontend audit and build
+        run: cd frontend && npm ci && npm audit && npm run build
 
       - name: Verify Go binary builds with embedded frontend
         run: go build ./cmd/sqzarr/
 
   security:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.22'
+          go-version: '1.26'
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
 
       - name: gosec
-        uses: securego/gosec@master
-        with:
-          args: '-exclude-dir=frontend $(go list ./... | grep -v /frontend/)'
+        run: gosec ./cmd/... ./internal/... ./scripts/...

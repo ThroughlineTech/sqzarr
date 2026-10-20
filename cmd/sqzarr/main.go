@@ -44,14 +44,20 @@ func main() {
 
 	switch os.Args[1] {
 	case "serve":
-		flag.CommandLine.Parse(os.Args[2:])
+		if err := flag.CommandLine.Parse(os.Args[2:]); err != nil {
+			os.Exit(2)
+		}
 		runServe(*cfgPath)
 	case "scan-once":
 		dryRun := flag.Bool("dry-run", false, "scan without enqueuing jobs")
-		flag.CommandLine.Parse(os.Args[2:])
+		if err := flag.CommandLine.Parse(os.Args[2:]); err != nil {
+			os.Exit(2)
+		}
 		runScanOnce(*cfgPath, *dryRun)
 	case "restore":
-		flag.CommandLine.Parse(os.Args[2:])
+		if err := flag.CommandLine.Parse(os.Args[2:]); err != nil {
+			os.Exit(2)
+		}
 		args := flag.Args()
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: sqzarr restore <job-id>")
@@ -237,6 +243,7 @@ func runRestore(cfgPath string, jobIDStr string) {
 	}
 
 	// Move original back from the processed dir to its original path.
+	// #nosec G301 -- restored library directories must remain traversable by the separate Plex user.
 	if err := os.MkdirAll(filepath.Dir(rec.OriginalPath), 0o755); err != nil {
 		log.Error("create parent dir", "error", err)
 		os.Exit(1)
@@ -248,10 +255,15 @@ func runRestore(cfgPath string, jobIDStr string) {
 
 	// Remove transcoded file.
 	if rec.OutputPath != "" && rec.OutputPath != rec.OriginalPath {
-		os.Remove(rec.OutputPath)
+		if err := os.Remove(rec.OutputPath); err != nil && !os.IsNotExist(err) {
+			log.Warn("remove transcoded file after restore", "path", rec.OutputPath, "error", err)
+		}
 	}
 
-	database.MarkOriginalDeleted(rec.ID)
+	if err := database.MarkOriginalDeleted(rec.ID); err != nil {
+		log.Error("mark original restored", "error", err)
+		os.Exit(1)
+	}
 	if err := database.UpdateJobStatus(jobID, db.JobRestored, "restored via CLI"); err != nil {
 		log.Error("update job status", "error", err)
 		os.Exit(1)
@@ -263,7 +275,10 @@ func runRestore(cfgPath string, jobIDStr string) {
 func runHashPassword() {
 	var password string
 	fmt.Print("Password: ")
-	fmt.Scan(&password)
+	if _, err := fmt.Scan(&password); err != nil {
+		fmt.Fprintf(os.Stderr, "read password: %v\n", err)
+		os.Exit(1)
+	}
 	if password == "" {
 		fmt.Fprintln(os.Stderr, "password must not be empty")
 		os.Exit(1)

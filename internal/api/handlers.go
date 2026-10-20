@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -178,7 +179,10 @@ func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	switch job.Status {
 	case db.JobPending:
-		s.db.UpdateJobStatus(id, db.JobCancelled, "cancelled by user")
+		if err := s.db.UpdateJobStatus(id, db.JobCancelled, "cancelled by user"); err != nil {
+			jsonError(w, "database error", http.StatusInternalServerError)
+			return
+		}
 	case db.JobRunning:
 		// Signal the running ffmpeg process to stop; the worker goroutine
 		// will update the status once it exits.
@@ -314,7 +318,10 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "only failed, error, or cancelled jobs can be retried", http.StatusBadRequest)
 		return
 	}
-	s.db.UpdateJobStatus(id, db.JobPending, "")
+	if err := s.db.UpdateJobStatus(id, db.JobPending, ""); err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -381,13 +388,15 @@ func (s *Server) validateDirPath(path string) (string, int) {
 	}
 
 	// Writability check: try creating and removing a sentinel file.
-	sentinel := filepath.Join(path, ".sqzarr_write_test")
-	f, err := os.Create(sentinel)
+	f, err := os.CreateTemp(path, ".sqzarr_write_test-*")
 	if err != nil {
 		return "directory is not writable", http.StatusBadRequest
 	}
-	f.Close()
-	os.Remove(sentinel)
+	closeErr := f.Close()
+	removeErr := os.Remove(f.Name())
+	if closeErr != nil || removeErr != nil {
+		return "could not finish directory writability check", http.StatusBadRequest
+	}
 
 	return "", 0
 }
@@ -1084,6 +1093,7 @@ func (s *Server) handleDeleteOriginal(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "original record not found", http.StatusNotFound)
 		return
 	}
+	// #nosec G703 -- the request supplies only a numeric ID; HeldPath is a worker-created database record.
 	if rerr := os.Remove(rec.HeldPath); rerr != nil && !os.IsNotExist(rerr) {
 		jsonError(w, "failed to delete original file", http.StatusInternalServerError)
 		return
@@ -1092,7 +1102,10 @@ func (s *Server) handleDeleteOriginal(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "database error", http.StatusInternalServerError)
 		return
 	}
-	s.db.UpdateJobStatus(rec.JobID, db.JobDone, "")
+	if err := s.db.UpdateJobStatus(rec.JobID, db.JobDone, ""); err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1113,31 +1126,46 @@ func (s *Server) handleRestoreOriginal(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Exclude bool `json:"exclude"`
 	}
-	json.NewDecoder(r.Body).Decode(&body) // ignore decode error (body optional)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	// Move original back to its original location.
+	// #nosec G301 G703 -- worker-recorded media path selected by ID; Plex needs traversal of restored media directories.
 	if err := os.MkdirAll(filepath.Dir(rec.OriginalPath), 0o755); err != nil {
 		jsonError(w, "failed to prepare restore path", http.StatusInternalServerError)
 		return
 	}
+	// #nosec G703 -- both paths come from the worker-created record, not request path fields.
 	if err := os.Rename(rec.HeldPath, rec.OriginalPath); err != nil {
 		jsonError(w, "failed to restore original file", http.StatusInternalServerError)
 		return
 	}
 
 	// Remove the transcoded output.
-	if rerr := os.Remove(rec.OutputPath); rerr != nil && !os.IsNotExist(rerr) {
-		s.log.Warn("restore: could not remove transcoded file",
-			"path", rec.OutputPath, "error", rerr)
-		// Non-fatal — original is restored, user can delete manually.
+	if rec.OutputPath != "" && rec.OutputPath != rec.OriginalPath {
+		// #nosec G703 -- output path is recorded by the worker, selected here by numeric record ID.
+		if rerr := os.Remove(rec.OutputPath); rerr != nil && !os.IsNotExist(rerr) {
+			s.log.Warn("restore: could not remove transcoded file",
+				"path", rec.OutputPath, "error", rerr)
+			// Non-fatal — original is restored, user can delete manually.
+		}
 	}
 
-	s.db.MarkOriginalDeleted(id)
+	if err := s.db.MarkOriginalDeleted(id); err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
+	}
 
 	if body.Exclude {
-		s.db.ExcludeJob(rec.JobID, "restored by user and excluded from future scans")
+		err = s.db.ExcludeJob(rec.JobID, "restored by user and excluded from future scans")
 	} else {
-		s.db.UpdateJobStatus(rec.JobID, db.JobRestored, "original restored by user")
+		err = s.db.UpdateJobStatus(rec.JobID, db.JobRestored, "original restored by user")
+	}
+	if err != nil {
+		jsonError(w, "database error", http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

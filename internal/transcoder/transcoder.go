@@ -134,6 +134,7 @@ func (t *Transcoder) run(ctx context.Context, encoder *Encoder, inputPath string
 	outputPath = t.tempOutputPath(inputPath)
 
 	// Ensure temp dir exists.
+	// #nosec G301 -- output may live in the media library, whose directories Plex must traverse.
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
@@ -148,22 +149,23 @@ func (t *Transcoder) run(ctx context.Context, encoder *Encoder, inputPath string
 	// and this output becomes library media after verification/replacement.
 	// Match the previous ordinary media-file mode so Plex can read it.
 	if err = scratch.Chmod(0o644); err != nil {
-		scratch.Close()
-		os.Remove(outputPath)
+		_ = scratch.Close() // Preserve the permission error; cleanup is logged separately.
+		t.removeScratch(outputPath)
 		return "", fmt.Errorf("set scratch media permissions: %w", err)
 	}
 	if err = scratch.Close(); err != nil {
-		os.Remove(outputPath)
+		t.removeScratch(outputPath)
 		return "", err
 	}
 	ownedPath := outputPath
 	defer func() {
 		if err != nil {
-			os.Remove(ownedPath)
+			t.removeScratch(ownedPath)
 		}
 	}()
 	args := rebuildWithProgress(encoder.BuildArgs(inputPath, outputPath))
 
+	// #nosec G204 -- fixed ffmpeg executable; BuildArgs constructs discrete arguments without a shell.
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
 	// Set LIBVA_DRIVER_NAME for VAAPI.
@@ -239,12 +241,13 @@ func (t *Transcoder) run(ctx context.Context, encoder *Encoder, inputPath string
 				break
 			}
 		}
-		io.Copy(io.Discard, reader)
+		if _, err := io.Copy(io.Discard, reader); err != nil {
+			t.log.Warn("drain ffmpeg stderr", "error", err)
+		}
 	}()
 
 	<-stderrDone
 	if err := cmd.Wait(); err != nil {
-		os.Remove(outputPath)
 		diag := ffmpegDiagnostic(stderrLines)
 		if diag != "" {
 			return "", fmt.Errorf("ffmpeg: %w\n%s", err, diag)
@@ -257,6 +260,12 @@ func (t *Transcoder) run(ctx context.Context, encoder *Encoder, inputPath string
 		return "", fmt.Errorf("ffmpeg produced no usable output")
 	}
 	return outputPath, nil
+}
+
+func (t *Transcoder) removeScratch(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.log.Error("remove scratch output", "path", path, "error", err)
+	}
 }
 
 // isDiagLine returns true for lines that contain useful diagnostic info

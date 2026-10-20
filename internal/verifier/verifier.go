@@ -120,6 +120,7 @@ func checkVideoStream(path string) error {
 		Streams []stream `json:"streams"`
 	}
 
+	// #nosec G204 -- fixed executable; media path is passed as one argument without shell evaluation.
 	out, err := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
@@ -145,6 +146,7 @@ func checkVideoStream(path string) error {
 // spotDecode asks ffmpeg to decode a single frame at posSecs.
 func spotDecode(path string, posSecs float64) error {
 	pos := strconv.FormatFloat(posSecs, 'f', 2, 64)
+	// #nosec G204 -- fixed executable and flags, numeric seek position and a separate media path; no shell.
 	cmd := exec.Command("ffmpeg",
 		"-hide_banner",
 		"-ss", pos,
@@ -172,6 +174,7 @@ type ffprobeFormat struct {
 }
 
 func probeDuration(path string) (float64, error) {
+	// #nosec G204 -- fixed executable; media path is passed as one argument without shell evaluation.
 	out, err := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",

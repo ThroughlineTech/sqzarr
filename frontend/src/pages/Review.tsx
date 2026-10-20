@@ -136,7 +136,7 @@ export function Review() {
                     Confirm delete {selected.size} originals?
                     <button
                       onClick={handleBulkDelete}
-                      className="text-xs bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700"
+                      className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-sm hover:bg-red-700"
                     >
                       Yes, delete
                     </button>
@@ -207,7 +207,7 @@ export function Review() {
                       <button
                         onClick={() => handleDelete(rec.id)}
                         title="Delete original (keep transcoded)"
-                        className="p-1.5 text-stone-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                        className="p-1.5 text-stone-400 hover:text-green-600 hover:bg-green-50 rounded-sm transition-colors"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -215,7 +215,7 @@ export function Review() {
                       <button
                         onClick={() => handleRestore(rec.id, false)}
                         title="Restore original (remove transcoded, re-queue later)"
-                        className="p-1.5 text-stone-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                        className="p-1.5 text-stone-400 hover:text-amber-600 hover:bg-amber-50 rounded-sm transition-colors"
                       >
                         <RotateCcw size={14} />
                       </button>
@@ -223,7 +223,7 @@ export function Review() {
                       <button
                         onClick={() => handleRestore(rec.id, true)}
                         title="Restore original and exclude from future scans"
-                        className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                        className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-sm transition-colors"
                       >
                         <BanIcon size={14} />
                       </button>

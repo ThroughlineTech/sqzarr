@@ -37,6 +37,7 @@ func CapabilityFingerprint() string {
 }
 
 func lowPowerQualified(path string) bool {
+	// #nosec G304 -- path is the configured qualification record; ownership/mode and contents are validated below.
 	f, e := os.Open(path)
 	if e != nil {
 		return false
@@ -117,6 +118,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 func inspectVideo(ctx context.Context, path string) (videoClass, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	// #nosec G204 -- fixed executable and separate ffprobe arguments; no shell evaluation.
 	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "V:0",
 		"-show_entries", "stream=codec_name,profile,pix_fmt,color_transfer,color_space,color_primaries,width,height,level,refs",
 		"-of", "json", path)
@@ -166,6 +168,7 @@ func softwareIdentity() string {
 	}
 	var b strings.Builder
 	for _, p := range []string{"/proc/sys/kernel/osrelease", "/sys/module/i915/version", "/sys/class/drm/renderD128/device/uevent"} {
+		// #nosec G304 -- p is one of the fixed kernel/driver identity paths above.
 		if value, e := os.ReadFile(p); e == nil {
 			b.Write(value)
 		}
@@ -241,6 +244,7 @@ func (t *Transcoder) probeChain(ctx context.Context, input string, v videoClass,
 		probeArgs = append(probeArgs, "-low_power", "1", "-rc_mode", "VBR")
 	}
 	probeArgs = append(probeArgs, "-frames:v", "24", "-an", "-sn", "-progress", "pipe:1", "-f", "null", "-")
+	// #nosec G204 -- fixed ffmpeg executable; internally constructed argument list, never a shell command.
 	cmd := exec.CommandContext(probeCtx, "ffmpeg", probeArgs...)
 	cmd.Env = append(os.Environ(), "LIBVA_DRIVER_NAME=iHD")
 	out := &tailBuffer{limit: 8192}

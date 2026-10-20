@@ -60,6 +60,28 @@ If any doc disagrees with the code, treat code + tests as authoritative and upda
   `make all` / `make test` remain useful on a local Linux workstation; on Windows,
   use cross-compilation and run the resulting tests in the Linux container.
 
+### Security verification
+
+- CI and release builds use Go 1.26 and Node 24 on Ubuntu 24.04. GitHub setup
+  actions are pinned to reviewed commits; update these deliberately.
+- Install the same scanner as CI with
+  `go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0`, then run
+  `gosec ./cmd/... ./internal/... ./scripts/...`. On Windows set `GOOS=linux`
+  and `GOARCH=amd64` for the scan. The explicit package roots exclude local
+  generated files in `dist/` and frontend dependencies.
+- Keep all scanner rules enabled. Any `#nosec` exception must identify the
+  specific rule and explain the trust boundary at that call site. Current
+  exceptions cover fixed system/config paths, worker-recorded original paths
+  selected by numeric ID, direct FFmpeg argument lists, and library directory
+  permissions needed by Plex.
+- Runtime config updates and application logs enforce owner-only file access
+  (`0600`), including existing files. Held-original directories are created
+  with `0750`; restored media directories retain `0755` for Plex access.
+- Frontend verification includes `npm audit` with development dependencies.
+  Tailwind 4 uses `@tailwindcss/postcss`; the theme and forms plugin live in
+  `frontend/src/index.css`. Keep `tailwind-merge` on a Tailwind 4-compatible
+  version when updating the styling toolchain.
+
 ### Production host settings and rollback
 
 - pve5 uses the firmware `balanced` profile and the CPU policy matched to

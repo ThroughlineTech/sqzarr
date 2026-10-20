@@ -295,6 +295,7 @@ func readGPUMHz() int {
 		"/sys/class/drm/card0/device/gt_cur_freq_mhz",
 	}
 	for _, p := range candidates {
+		// #nosec G304 -- candidates contains only the fixed sysfs paths above.
 		b, err := os.ReadFile(p)
 		if err != nil {
 			continue
@@ -329,6 +330,7 @@ func readGPUPercent() float64 {
 	}
 
 	readRC6 := func() (uint64, error) {
+		// #nosec G304 -- rc6Path is selected only from the fixed sysfs paths above.
 		b, err := os.ReadFile(rc6Path)
 		if err != nil {
 			return 0, err
@@ -372,7 +374,7 @@ func spaHandler(fileServer http.Handler, fsys fs.FS) http.Handler {
 		f, err := fsys.Open(p)
 		if err == nil {
 			fi, _ := f.Stat()
-			f.Close()
+			_ = f.Close() // Read-only embedded file; there is no buffered data to flush.
 			if fi != nil && !fi.IsDir() {
 				fileServer.ServeHTTP(w, r)
 				return

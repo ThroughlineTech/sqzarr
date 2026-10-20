@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,7 +114,9 @@ func (s *Scanner) ScanDirectory(ctx context.Context, dir *db.Directory) (*Result
 	if walkErr != nil {
 		errMsg = walkErr.Error()
 	}
-	s.db.FinishScanRun(runID, res.FilesScanned, res.FilesQueued, res.FilesSkipped, durationMS, errMsg)
+	if err := s.db.FinishScanRun(runID, res.FilesScanned, res.FilesQueued, res.FilesSkipped, durationMS, errMsg); err != nil {
+		return res, fmt.Errorf("finish scan run: %w", err)
+	}
 
 	if walkErr != nil {
 		return res, fmt.Errorf("walk: %w", walkErr)
@@ -239,6 +242,7 @@ type ffprobeOutput struct {
 }
 
 func probeFile(path string) (*probeResult, error) {
+	// #nosec G204 -- fixed ffprobe executable and separate arguments, with no shell evaluation.
 	out, err := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
@@ -263,7 +267,12 @@ func probeFile(path string) (*probeResult, error) {
 		}
 	}
 
-	fmt.Sscanf(p.Format.Duration, "%f", &r.duration)
-	fmt.Sscanf(p.Format.BitRate, "%d", &r.bitrate)
+	// ffprobe uses empty/N/A values for unavailable metadata; leave those at zero.
+	if duration, err := strconv.ParseFloat(p.Format.Duration, 64); err == nil {
+		r.duration = duration
+	}
+	if bitrate, err := strconv.ParseInt(p.Format.BitRate, 10, 64); err == nil {
+		r.bitrate = bitrate
+	}
 	return r, nil
 }

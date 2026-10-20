@@ -17,7 +17,7 @@ const config: Record<Job['Status'], { label: string; className: string }> = {
 export function StatusBadge({ status }: { status: Job['Status'] }) {
   const { label, className } = config[status] ?? config.pending
   return (
-    <span className={cn('inline-flex items-center px-2 py-0.5 rounded text-xs font-medium', className)}>
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium', className)}>
       {label}
     </span>
   )

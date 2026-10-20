@@ -58,4 +58,6 @@
 - Isolate encoder fallback per job, preserve media streams, exclude unfinished
   scratch outputs from scanning, and retain media-readable output permissions.
 - Reject invalid verification durations and prevent replacement after cancellation.
+- Resolve executable symlinks in VAAPI qualification fingerprints so shell and
+  systemd PATH aliases cannot disable an otherwise qualified low-power pipeline.
 

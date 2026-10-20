@@ -148,6 +148,15 @@ func softwareIdentity() string {
 	paths := []string{vaDevice}
 	for _, bin := range []string{"ffmpeg", "ffprobe"} {
 		if p, e := exec.LookPath(bin); e == nil {
+			// Login shells and systemd may resolve the same executable through
+			// /bin and /usr/bin on merged-/usr systems. Fingerprint the actual
+			// executable, not the PATH alias used to find it.
+			if absolute, err := filepath.Abs(p); err == nil {
+				p = absolute
+			}
+			if resolved, err := filepath.EvalSymlinks(p); err == nil {
+				p = resolved
+			}
 			paths = append(paths, p)
 		}
 	}

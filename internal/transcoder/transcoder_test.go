@@ -145,6 +145,28 @@ func TestProbeSuccessCacheRefreshAndZeroFrames(t *testing.T) {
 	}
 }
 
+func TestQualificationFingerprintIgnoresExecutablePathAliases(t *testing.T) {
+	realDir := fakeCommands(t, `printf 'frame=24\nprogress=end\n'`)
+	originalPath := os.Getenv("PATH")
+	first := CapabilityFingerprint()
+	aliasDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.Symlink(realDir, aliasDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", aliasDir+string(os.PathListSeparator)+originalPath)
+	if got := CapabilityFingerprint(); got != first {
+		t.Fatal("PATH directory alias invalidated the same qualified executables")
+	}
+
+	// A different installation must still invalidate qualification, even if
+	// its executable has the same basename and is found through an alias.
+	otherDir := fakeCommands(t, `printf 'different ffmpeg build\n'`)
+	t.Setenv("PATH", otherDir+string(os.PathListSeparator)+originalPath)
+	if got := CapabilityFingerprint(); got == first {
+		t.Fatal("different executable installation retained qualification")
+	}
+}
+
 func TestPerJobFallbackAndScratchIsolation(t *testing.T) {
 	fakeCommands(t, `
 case "$*" in
@@ -227,7 +249,7 @@ func TestCancellationAndIOFailureDoNotRetry(t *testing.T) {
 }
 
 func TestOutputReadableByMediaServices(t *testing.T) {
-	fakeCommands(t,`
+	fakeCommands(t, `
 for last do :; done
 printf 'encoded' > "$last"
 `)

@@ -41,6 +41,39 @@ never an automatic quality endorsement.
 Existing Plex verification and unrelated workspace changes were preserved.
 No commit or push was requested or performed.
 
+Subsequent delivery: the user requested commits and a push. The release and
+documentation were pushed as `88fa3ee` and `7f5443c`.
+
+### Production qualification correction
+
+A subsequent production job ran near 7.5× because the actual systemd service
+rejected the qualification record and selected standard VBR. The validation
+shell resolved FFmpeg/ffprobe through `/bin`; the service PATH resolved them
+through `/usr/bin`. These are the same files on this container, but the
+fingerprint includes the executable path string. The isolated application
+validation therefore did not detect this production-environment mismatch.
+
+The original qualified stack fingerprint was rechecked, both executable aliases
+were verified to identify identical files, and only the record fingerprint was
+regenerated using the running service's PATH. The prior qualification time,
+input class and settings were retained, with a private backup alongside the
+record. The production `/api/v1/config` then reported `low_power_status` as
+`qualified`. No service restart, reboot or job cancellation was performed.
+This check confirms production qualification; it is not a new throughput
+measurement. Jobs already planned retain their selected pipeline.
+
+The durable code fix now resolves executable symlinks before fingerprinting.
+The Linux regression verifies that PATH aliases preserve qualification while
+a different executable installation invalidates it. Local Go vet/build and the
+Linux transcoder suite passed. Both `/bin`-first and `/usr/bin`-first PATHs matched
+the existing qualified record before installation, and the restarted production
+service reported `qualified` afterward. Queue state was restored to unpaused.
+CT260 was updated offline and remained stopped.
+
+Current installed SHA-256 on both hosts after this correction:
+`fce00d7e6c15b4cb82e8d9c74dcd40ea15c3d694e82b173133f74e4e16c02920`.
+Encoding arguments and subtitle metadata handling are unchanged.
+
 ## Completed validation
 
 - Local frontend TypeScript/Vite production build and `go vet ./...` passed.
@@ -191,7 +224,7 @@ repeated for it.
 | Encoding policy | Automatic GPU decode, standard VBR | Qualified GPU decode and LP VBR |
 | Production queue | Standby | Unpaused, restored to original state |
 
-Both installed application SHA-256:
+Initial release application SHA-256 (before the path correction above):
 `f50b02653c772972181278e10273fbea5c1178fd59fad5d9754bd95df18e5393`.
 The application's reported version remains `1.0.0`; use the hash to identify this
 uncommitted release precisely.

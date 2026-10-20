@@ -552,6 +552,13 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
 Transfer it into the container and run it there with the same `PATH` and runtime
 as SQZARR. The tool prints candidate JSON to stdout and a reminder to stderr; it
 does not execute tests or install anything. Generating JSON is not qualification.
+Executable paths are resolved through symlinks before fingerprinting, so
+`/bin/ffmpeg` and `/usr/bin/ffmpeg` identify the same executable on merged-/usr
+systems. Still use the service's PATH: genuinely different installations must
+not share qualification. An interactive-shell check alone is insufficient.
+After installation, require
+the production service's `/api/v1/config` to report `low_power_status` as
+`qualified`, then confirm the selected pipeline in its next eligible job log.
 After all gates pass, save its output privately, review the recorded identity,
 and install it as root at `/etc/sqzarr/vaapi-low-power-qualified.json` with owner
 `root:root` and mode `0600`. The service must be able to read the record.

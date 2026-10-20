@@ -25,13 +25,13 @@ type ServerConfig struct {
 }
 
 type ScannerConfig struct {
-	IntervalHours     int      `toml:"interval_hours"`
-	WorkerConcurrency int      `toml:"worker_concurrency"`
+	IntervalHours     int `toml:"interval_hours"`
+	WorkerConcurrency int `toml:"worker_concurrency"`
 	// RootDirs are the filesystem roots the browser and directory picker are
 	// allowed to access. Paths outside these roots are rejected.
-	RootDirs          []string `toml:"root_dirs"`
+	RootDirs []string `toml:"root_dirs"`
 	// Paused persists the queue pause state across restarts.
-	Paused            bool     `toml:"paused"`
+	Paused bool `toml:"paused"`
 }
 
 type TranscoderConfig struct {
@@ -39,6 +39,10 @@ type TranscoderConfig struct {
 	// Encoder selects the preferred encoder: "vaapi", "videotoolbox", "nvenc",
 	// "software", or "" (empty = auto-detect best available).
 	Encoder string `toml:"encoder"`
+	// HardwareDecode enables qualified VAAPI decoding ("auto") or software decoding ("off").
+	HardwareDecode string `toml:"hardware_decode"`
+	// LowPower permits only qualified bitrate-controlled encoding, never a CQP substitution.
+	LowPower string `toml:"low_power"`
 }
 
 type SafetyConfig struct {
@@ -87,6 +91,10 @@ func Defaults() *Config {
 			IntervalHours:     6,
 			WorkerConcurrency: 1,
 		},
+		Transcoder: TranscoderConfig{
+			HardwareDecode: "auto",
+			LowPower:       "auto",
+		},
 		Safety: SafetyConfig{
 			ProcessedDirName:       ".processed",
 			OriginalsRetentionDays: 10,
@@ -113,6 +121,12 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	if err := ValidateTranscodePolicy(c.Transcoder.HardwareDecode); err != nil {
+		return fmt.Errorf("transcoder.hardware_decode: %w", err)
+	}
+	if err := ValidateTranscodePolicy(c.Transcoder.LowPower); err != nil {
+		return fmt.Errorf("transcoder.low_power: %w", err)
+	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535")
 	}
@@ -130,6 +144,14 @@ func (c *Config) validate() error {
 	}
 	if c.Plex.Enabled && c.Plex.Token == "" {
 		return fmt.Errorf("plex.token is required when plex.enabled is true")
+	}
+	return nil
+}
+
+// ValidateTranscodePolicy rejects unknown policies rather than silently changing behavior.
+func ValidateTranscodePolicy(value string) error {
+	if value != "auto" && value != "off" {
+		return fmt.Errorf("must be auto or off")
 	}
 	return nil
 }

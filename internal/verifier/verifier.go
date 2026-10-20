@@ -11,19 +11,19 @@ import (
 )
 
 const (
-	minSizeFloorBytes  = 1024 * 1024 // 1 MB absolute minimum
-	minSizeFloorRatio  = 0.10         // output must be at least 10% of input
+	minSizeFloorBytes = 1024 * 1024 // 1 MB absolute minimum
+	minSizeFloorRatio = 0.10        // output must be at least 10% of input
 )
 
 // Result holds the outcome of an output file verification.
 type Result struct {
-	InputSize      int64
-	OutputSize     int64
-	InputDur       float64
-	OutputDur      float64
-	DurationDiff   float64
-	OK             bool
-	Reason         string
+	InputSize    int64
+	OutputSize   int64
+	InputDur     float64
+	OutputDur    float64
+	DurationDiff float64
+	OK           bool
+	Reason       string
 	// Uncompressible is true when the output is not smaller than the input,
 	// indicating the file won't benefit from re-encoding. The job should be
 	// permanently excluded rather than retried.
@@ -187,7 +187,13 @@ func probeDuration(path string) (float64, error) {
 		return 0, fmt.Errorf("parse ffprobe output: %w", err)
 	}
 
-	var dur float64
-	fmt.Sscanf(result.Format.Duration, "%f", &dur)
+	return parseDuration(result.Format.Duration)
+}
+
+func parseDuration(value string) (float64, error) {
+	dur, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(dur) || math.IsInf(dur, 0) || dur <= 0 {
+		return 0, fmt.Errorf("invalid media duration %q", value)
+	}
 	return dur, nil
 }

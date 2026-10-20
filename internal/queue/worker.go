@@ -88,6 +88,13 @@ func New(database *db.DB, cfg *config.Config, enc *transcoder.Transcoder, plex P
 	return w
 }
 
+// SetPlexNotifier replaces the integration used by subsequent notifications.
+func (w *Worker) SetPlexNotifier(notifier PlexNotifier) {
+	w.mu.Lock()
+	w.plex = notifier
+	w.mu.Unlock()
+}
+
 // SetConcurrency updates the maximum number of concurrent transcode jobs.
 func (w *Worker) SetConcurrency(n int) {
 	if n < 1 {
@@ -286,6 +293,15 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 		return
 	}
 
+	// Cancellation may arrive while output verification is running. Never
+	// stage a replacement for a job the user has already cancelled.
+	if ctx.Err() != nil {
+		os.Remove(outputPath)
+		w.db.UpdateJobStatus(job.ID, db.JobCancelled, "cancelled by user")
+		w.emit(Event{Type: EventFailed, JobID: job.ID, Error: "cancelled"})
+		return
+	}
+
 	// Compute the new output filename with codec token replacement.
 	newName := rename.OutputName(filepath.Base(job.SourcePath))
 	finalOutputPath := rename.OutputPath(
@@ -352,8 +368,11 @@ func (w *Worker) processJob(ctx context.Context, job *db.Job) {
 	w.emit(Event{Type: EventDone, JobID: job.ID, Progress: 1.0})
 
 	// Notify Plex of the new file — non-fatal.
-	if w.plex != nil {
-		go w.plex.NotifyFileReplaced(finalOutputPath)
+	w.mu.RLock()
+	notifier := w.plex
+	w.mu.RUnlock()
+	if notifier != nil {
+		go notifier.NotifyFileReplaced(finalOutputPath)
 	}
 }
 

@@ -10,20 +10,22 @@ import (
 // keySection maps each runtime-editable config key to its TOML section.
 // Keys not found in the file are inserted into the correct section.
 var keySection = map[string]string{
-	"interval_hours":          "scanner",
-	"worker_concurrency":      "scanner",
-	"root_dirs":               "scanner",
-	"paused":                  "scanner",
-	"processed_dir_name":      "safety",
+	"interval_hours":           "scanner",
+	"worker_concurrency":       "scanner",
+	"root_dirs":                "scanner",
+	"paused":                   "scanner",
+	"processed_dir_name":       "safety",
 	"originals_retention_days": "safety",
-	"fail_threshold":          "safety",
-	"system_fail_threshold":   "safety",
-	"delete_confirm_single":   "safety",
-	"encoder":                 "transcoder",
-	"password_hash":           "auth",
-	"enabled":                 "plex",
-	"base_url":                "plex",
-	"token":                   "plex",
+	"fail_threshold":           "safety",
+	"system_fail_threshold":    "safety",
+	"delete_confirm_single":    "safety",
+	"encoder":                  "transcoder",
+	"hardware_decode":          "transcoder",
+	"low_power":                "transcoder",
+	"password_hash":            "auth",
+	"enabled":                  "plex",
+	"base_url":                 "plex",
+	"token":                    "plex",
 }
 
 // UpdateFile updates specific key=value pairs in a TOML config file in-place.

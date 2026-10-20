@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,15 @@ import (
 var VideoExtensions = map[string]bool{
 	".mkv": true, ".mp4": true, ".avi": true, ".mov": true,
 	".m4v": true, ".ts": true, ".m2ts": true, ".wmv": true,
+}
+
+// scratchVideoName reserves the legacy output suffix and the numeric suffix
+// added by os.CreateTemp for per-attempt outputs. Never scan an in-flight encode.
+var scratchVideoName = regexp.MustCompile(`(?i)\.sqzarr-tmp(?:-[0-9]+)?\.[^.]+$`)
+
+// IsScratchPath identifies outputs reserved for an unfinished transcode attempt.
+func IsScratchPath(path string) bool {
+	return scratchVideoName.MatchString(filepath.Base(path))
 }
 
 // Result summarises a completed scan.
@@ -75,6 +85,9 @@ func (s *Scanner) ScanDirectory(ctx context.Context, dir *db.Directory) (*Result
 			return nil
 		}
 		if !VideoExtensions[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		if IsScratchPath(path) {
 			return nil
 		}
 

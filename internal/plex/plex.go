@@ -1,10 +1,14 @@
 package plex
 
 import (
+	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,7 +31,9 @@ func New(baseURL, token string, log *slog.Logger) *Client {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		log:     log,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}},
 	}
 }
 
@@ -71,28 +77,57 @@ type plexSections struct {
 }
 
 func (c *Client) listSections() ([]plexSection, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/library/sections", nil)
+	return c.listSectionsContext(context.Background())
+}
+
+// Verify checks library access without triggering a refresh or changing media.
+func (c *Client) Verify(ctx context.Context) (int, error) {
+	if c == nil {
+		return 0, errors.New("Save a Plex URL and token before verifying")
+	}
+	sections, err := c.listSectionsContext(ctx)
+	return len(sections), err
+}
+
+func (c *Client) request(ctx context.Context, path string) (*http.Response, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("Plex URL must be HTTP or HTTPS without credentials, query parameters, or fragments")
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("Invalid Plex URL")
 	}
 	req.Header.Set("X-Plex-Token", c.token)
 	req.Header.Set("Accept", "application/xml")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request: %w", err)
+		return nil, errors.New("Could not reach Plex; check the URL, network, and TLS certificate (10-second timeout)")
+	}
+	return resp, nil
+}
+
+func (c *Client) listSectionsContext(ctx context.Context) ([]plexSection, error) {
+	resp, err := c.request(ctx, "/library/sections")
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("Plex rejected access; check the token and its library permissions")
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("Plex returned HTTP %d; check the server URL (redirects are not followed)", resp.StatusCode)
 	}
 
 	var container struct {
+		XMLName     xml.Name      `xml:"MediaContainer"`
 		Directories []plexSection `xml:"Directory"`
 	}
-	if err := xml.NewDecoder(resp.Body).Decode(&container); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&container); err != nil {
+		return nil, errors.New("Plex returned an invalid library response; check the server URL")
 	}
 	return container.Directories, nil
 }
@@ -110,13 +145,7 @@ func (c *Client) findSection(sections []plexSection, filePath string) string {
 }
 
 func (c *Client) refreshSection(sectionID string) error {
-	url := fmt.Sprintf("%s/library/sections/%s/refresh?X-Plex-Token=%s",
-		c.baseURL, sectionID, c.token)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.http.Do(req)
+	resp, err := c.request(context.Background(), "/library/sections/"+url.PathEscape(sectionID)+"/refresh")
 	if err != nil {
 		return err
 	}

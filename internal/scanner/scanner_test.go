@@ -4,10 +4,12 @@ package scanner_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -73,16 +75,39 @@ func TestScannerEnqueuesOversizedHEVC(t *testing.T) {
 	database := testutil.NewTestDB(t)
 	dir := t.TempDir()
 
-	// Encode a short HEVC clip at a relatively high bitrate.
+	// A requested ABR is not a guaranteed bitrate for a simple test pattern.
+	// Seeded temporal noise plus lossless HEVC makes this small fixture reliably
+	// exceed the scan threshold without a costly 1080p encode.
 	clipPath := filepath.Join(dir, "hevc_big.mkv")
 	cmd := exec.Command("ffmpeg", "-y",
 		"-f", "lavfi",
-		"-i", "testsrc=duration=10:size=1920x1080:rate=25",
-		"-c:v", "libx265", "-b:v", "8000k",
+		"-i", "testsrc2=duration=3:size=640x360:rate=25,noise=alls=50:allf=t+u:all_seed=42",
+		"-c:v", "libx265", "-preset", "ultrafast",
+		"-x265-params", "lossless=1:pools=2:frame-threads=1",
 		clipPath,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("cannot create HEVC test clip: %v\n%s", err, out)
+	}
+	const threshold = 2_222_000
+	probe, err := exec.Command("ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", clipPath).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var measured struct {
+		Streams []struct {
+			CodecName string `json:"codec_name"`
+		} `json:"streams"`
+		Format struct {
+			BitRate string `json:"bit_rate"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(probe, &measured); err != nil {
+		t.Fatal(err)
+	}
+	bitrate, err := strconv.ParseInt(measured.Format.BitRate, 10, 64)
+	if err != nil || bitrate <= threshold || len(measured.Streams) != 1 || measured.Streams[0].CodecName != "hevc" {
+		t.Fatalf("invalid oversized HEVC fixture: measured bitrate=%d threshold=%d parse error=%v", bitrate, threshold, err)
 	}
 
 	past := time.Now().Add(-10 * 24 * time.Hour)
@@ -92,7 +117,7 @@ func TestScannerEnqueuesOversizedHEVC(t *testing.T) {
 		Path:       dir,
 		Enabled:    true,
 		MinAgeDays: 7,
-		MaxBitrate: 2_222_000, // 1 GB/hr — clip is well above this
+		MaxBitrate: threshold, // fixture bitrate asserted above
 	})
 	dbDir, _ := database.GetDirectory(dirID)
 
@@ -157,12 +182,35 @@ func TestScannerEnqueuesOversizedAV1(t *testing.T) {
 	clipPath := filepath.Join(dir, "av1_big.mkv")
 	cmd := exec.Command("ffmpeg", "-y",
 		"-f", "lavfi",
-		"-i", "testsrc=duration=10:size=1920x1080:rate=25",
-		"-c:v", "libaom-av1", "-b:v", "5000k", "-cpu-used", "8",
+		"-i", "testsrc2=duration=2:size=320x180:rate=25,noise=alls=50:allf=t+u:all_seed=42",
+		"-c:v", "libaom-av1", "-crf", "0", "-b:v", "0", "-cpu-used", "8",
+		"-threads", "2", "-row-mt", "1",
 		clipPath,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("cannot create AV1 test clip (libaom-av1 may not be available): %v\n%s", err, out)
+	}
+	// Requested ABR on a simple pattern can undershoot. Check the actual
+	// lossless noisy fixture before exercising the scanner's bitrate gate.
+	const threshold = 2_222_000
+	probe, err := exec.Command("ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", clipPath).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var measured struct {
+		Streams []struct {
+			CodecName string `json:"codec_name"`
+		} `json:"streams"`
+		Format struct {
+			BitRate string `json:"bit_rate"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(probe, &measured); err != nil {
+		t.Fatal(err)
+	}
+	bitrate, err := strconv.ParseInt(measured.Format.BitRate, 10, 64)
+	if err != nil || bitrate <= threshold || len(measured.Streams) != 1 || measured.Streams[0].CodecName != "av1" {
+		t.Fatalf("invalid oversized AV1 fixture: measured bitrate=%d threshold=%d parse error=%v", bitrate, threshold, err)
 	}
 
 	past := time.Now().Add(-10 * 24 * time.Hour)
@@ -172,7 +220,7 @@ func TestScannerEnqueuesOversizedAV1(t *testing.T) {
 		Path:       dir,
 		Enabled:    true,
 		MinAgeDays: 7,
-		MaxBitrate: 2_222_000,
+		MaxBitrate: threshold,
 	})
 	dbDir, _ := database.GetDirectory(dirID)
 

@@ -243,23 +243,9 @@ func probeNVENCWithLogging(log *slog.Logger) *Encoder {
 func vaapiEncoder() *Encoder {
 	return &Encoder{
 		Type:        EncoderVAAPI,
-		DisplayName: "Intel VAAPI (hevc_vaapi)",
+		DisplayName: "Intel VAAPI HEVC VBR",
 		BuildArgs: func(inputPath, outputPath string) []string {
-			return []string{
-				"-y",
-				"-init_hw_device", "vaapi=va:/dev/dri/renderD128",
-				"-filter_hw_device", "va",
-				"-i", inputPath,
-				"-vf", `format=nv12,hwupload,scale_vaapi=w=min(1920\,iw):h=-2`,
-				"-c:v", "hevc_vaapi",
-				"-b:v", "2300k",
-				"-maxrate", "4000k",
-				"-bufsize", "4600k",
-				"-c:a", "copy",
-				"-c:s", "copy",
-				"-max_muxing_queue_size", "9999",
-				outputPath,
-			}
+			return vaapiArgs(inputPath, outputPath, false)
 		},
 	}
 }
@@ -273,6 +259,7 @@ func videoToolboxEncoder() *Encoder {
 				"-y",
 				"-i", inputPath,
 				"-c:v", "hevc_videotoolbox",
+				"-map", "0:V:0", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?", "-map_metadata", "0", "-map_chapters", "0", "-c:t", "copy",
 				"-b:v", "2300k",
 				"-maxrate", "4000k",
 				"-bufsize", "4600k",
@@ -294,6 +281,7 @@ func nvencEncoder() *Encoder {
 				"-y",
 				"-i", inputPath,
 				"-c:v", "hevc_nvenc",
+				"-map", "0:V:0", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?", "-map_metadata", "0", "-map_chapters", "0", "-c:t", "copy",
 				"-preset", "p4",
 				"-b:v", "2300k",
 				"-maxrate", "4000k",
@@ -316,6 +304,7 @@ func softwareEncoder() *Encoder {
 				"-y",
 				"-i", inputPath,
 				"-c:v", "libx265",
+				"-map", "0:V:0", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?", "-map_metadata", "0", "-map_chapters", "0", "-c:t", "copy",
 				"-crf", "23",
 				"-preset", "medium",
 				"-b:v", "0",

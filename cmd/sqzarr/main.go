@@ -123,6 +123,7 @@ func runServe(cfgPath string) {
 	log.Info("encoder selected", "encoder", enc.DisplayName)
 
 	t := transcoder.New(enc, cfg.Transcoder.TempDir, log)
+	t.SetPolicy(cfg.Transcoder.HardwareDecode, cfg.Transcoder.LowPower)
 
 	var plexNotifier queue.PlexNotifier
 	if cfg.Plex.Enabled {

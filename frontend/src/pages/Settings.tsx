@@ -94,6 +94,7 @@ export function Settings() {
   const [saveResult, setSaveResult] = useState<'ok' | string | null>(null)
   const [encoders, setEncoders] = useState<EncoderOption[]>([])
   const [selectedEncoder, setSelectedEncoder] = useState('')
+  const [hardwareDecode, setHardwareDecode] = useState<'auto' | 'off'>('auto')
 
   // Editable form state — initialised from cfg once loaded
   const [concurrency, setConcurrency] = useState(1)
@@ -109,6 +110,26 @@ export function Settings() {
   const [rootDirs, setRootDirs] = useState<string[]>([])
   const [newRootInput, setNewRootInput] = useState('')
   const [showRootBrowser, setShowRootBrowser] = useState(false)
+  const [plexChecking, setPlexChecking] = useState(false)
+  const [plexResult, setPlexResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const plexDirty = !!cfg && (plexEnabled !== cfg.plex_enabled || plexURL !== cfg.plex_base_url || plexToken !== '')
+
+  useEffect(() => { setPlexResult(null) }, [plexEnabled, plexURL, plexToken])
+
+  const handleVerifyPlex = async () => {
+    setPlexChecking(true)
+    setPlexResult(null)
+    try {
+      const result = await api.verifyPlex()
+      setPlexResult({ ok: true, message: result.library_count > 0
+        ? `Connected to Plex. Library access confirmed (${result.library_count} libraries).`
+        : 'Connected to Plex, but no libraries are accessible. Check the server libraries and token permissions.' })
+    } catch (err) {
+      setPlexResult({ ok: false, message: err instanceof Error ? err.message : 'Plex verification failed' })
+    } finally {
+      setPlexChecking(false)
+    }
+  }
 
   // Password change form state
   const [currentPassword, setCurrentPassword] = useState('')
@@ -134,10 +155,11 @@ export function Settings() {
       plexURL !== cfg.plex_base_url ||
       plexToken !== '' ||
       selectedEncoder !== cfg.encoder ||
+      hardwareDecode !== cfg.hardware_decode ||
       !rootsMatch
     )
   }, [cfg, concurrency, intervalHours, processedDirName, retentionDays, failThreshold,
-      systemFailThreshold, deleteConfirmSingle, plexEnabled, plexURL, plexToken, rootDirs, selectedEncoder])
+      systemFailThreshold, deleteConfirmSingle, plexEnabled, plexURL, plexToken, rootDirs, selectedEncoder, hardwareDecode])
 
   const blocker = useBlocker(isDirty)
 
@@ -165,6 +187,7 @@ export function Settings() {
         setRootDirs(c.root_dirs ?? [])
         setEncoders(enc)
         setSelectedEncoder(c.encoder)
+        setHardwareDecode(c.hardware_decode)
       })
       .catch(() => {})
   }, [])
@@ -186,6 +209,7 @@ export function Settings() {
         plex_base_url: plexURL,
         root_dirs: rootDirs,
         encoder: selectedEncoder,
+        hardware_decode: hardwareDecode,
       }
       if (plexToken) {
         updates.plex_token = plexToken
@@ -272,6 +296,31 @@ export function Settings() {
                 <p className="text-xs text-amber-600">
                   Software encoding (libx265) is significantly slower than hardware encoding. Use only as a fallback.
                 </p>
+              )}
+              {selectedEncoder === 'vaapi' && (
+                <>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <label htmlFor="hardware-decode" className="text-sm text-stone-700">Hardware decoding</label>
+                      <p className="text-xs text-stone-400 mt-0.5">Automatic checks supported H.264 video and falls back when needed.</p>
+                    </div>
+                    <select id="hardware-decode" value={hardwareDecode}
+                      onChange={e => setHardwareDecode(e.target.value as 'auto' | 'off')}
+                      className="w-56 text-sm border border-stone-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
+                      <option value="auto">Automatic</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-stone-500">
+                    {cfg.low_power_status === 'qualified'
+                      ? 'Low-power bitrate-controlled encoding is qualified; each supported pipeline is checked before use.'
+                      : cfg.low_power_status === 'off'
+                        ? 'Low-power encoding is off. Standard bitrate-controlled encoding is used.'
+                        : 'Standard bitrate-controlled encoding. Low-power encoding has not been qualified on this host.'}
+                    {' '}
+                    The selected pipeline and any fallback are recorded in each job's log.
+                  </p>
+                </>
               )}
             </Card>
           </section>
@@ -482,6 +531,7 @@ export function Settings() {
                 <button
                   type="button"
                   onClick={() => setPlexEnabled(v => !v)}
+                  disabled={plexChecking}
                   className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                     plexEnabled ? 'bg-amber-500' : 'bg-stone-300'
                   }`}
@@ -497,7 +547,7 @@ export function Settings() {
                   type="text"
                   value={plexURL}
                   onChange={e => setPlexURL(e.target.value)}
-                  disabled={!plexEnabled}
+                  disabled={!plexEnabled || plexChecking}
                   placeholder="http://192.168.1.10:32400"
                   className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
                 />
@@ -508,10 +558,24 @@ export function Settings() {
                   type="password"
                   value={plexToken}
                   onChange={e => setPlexToken(e.target.value)}
-                  disabled={!plexEnabled}
+                  disabled={!plexEnabled || plexChecking}
                   placeholder={cfg.plex_token === 'SET' ? '●●●●●●●● (set)' : 'paste token here'}
                   className="flex-1 min-w-0 text-sm border border-stone-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-40"
                 />
+              </div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleVerifyPlex}
+                  disabled={plexChecking || saving || !plexEnabled || plexDirty}
+                  className="px-3 py-1.5 text-sm border border-stone-300 text-stone-700 hover:bg-stone-50 rounded-md disabled:opacity-50 transition-colors"
+                >
+                  {plexChecking ? 'Verifying…' : 'Verify Plex connection'}
+                </button>
+                {plexDirty && <p className="text-xs text-stone-500">Save Plex settings before verifying.</p>}
+                <div role="status" aria-live="polite">
+                  {plexResult && <p className={`text-sm ${plexResult.ok ? 'text-green-700' : 'text-red-600'}`}>{plexResult.message}</p>}
+                </div>
               </div>
             </Card>
           </section>
@@ -525,7 +589,7 @@ export function Settings() {
             )}
             <button
               type="submit"
-              disabled={saving || !isDirty}
+              disabled={saving || plexChecking || !isDirty}
               className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-md transition-colors"
             >
               {saving ? 'Saving…' : 'Save Settings'}

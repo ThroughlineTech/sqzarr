@@ -47,3 +47,15 @@
 - systemd and launchd service support
 - CI/CD workflows, cross-platform release builds
 
+# Unreleased
+
+- Add Settings → Plex → Verify Plex connection, checking saved server connectivity
+  and library access with clear errors and a library count.
+- Apply saved Plex settings to subsequent automatic refreshes without restarting.
+- Keep Plex tokens out of refresh URLs and transport errors; reject redirects.
+- Automatically probe eligible H.264 SDR inputs for VAAPI decoding and select
+  low-power VBR only with a matching quality qualification and runtime probe.
+- Isolate encoder fallback per job, preserve media streams, exclude unfinished
+  scratch outputs from scanning, and retain media-readable output permissions.
+- Reject invalid verification durations and prevent replacement after cancellation.
+

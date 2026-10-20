@@ -21,9 +21,34 @@ Self-hosted GPU-accelerated media transcoder. Scans your library, finds files th
 
 ## Requirements
 
-- **Linux:** `ffmpeg` 4.x+ with VAAPI support
-- **macOS:** `ffmpeg` 4.x+ (Homebrew: `brew install ffmpeg`)
+### Automatic VAAPI decoding
+
+SQZARR automatically checks eligible H.264 8-bit SDR inputs for GPU-resident
+decoding before transcoding. A bounded probe checks the actual decode, filter
+and HEVC encode chain; unsupported inputs retain software decoding. Settings →
+Hardware → Hardware decoding provides an **Off** override. Existing config files
+default to `hardware_decode = "auto"` in `[transcoder]`; changes apply to subsequent
+jobs. Each job log records its selected path and any fallback.
+
+The production encoder retains bitrate control (2300k target, 4000k maximum,
+4600k buffer). `[transcoder] low_power = "auto"` reserves automatic selection for
+qualified low-power VBR. Without a matching administrator-installed qualification
+manifest, it remains **unqualified** and uses standard encoding. A qualified host
+must still pass the runtime chain probe. It never substitutes CQP.
+`low_power = "off"` explicitly disables it.
+No BIOS, power-management or firmware change is required for automatic decoding.
+The qualified input class excludes HDR and 10-bit video; the automatic decoder
+does not promise HDR preservation or qualify new tone-mapping behavior.
+
+### Runtime dependencies
+
+- **Linux:** `ffmpeg` 7.x with VAAPI support (validated with 7.1.3).
+- **macOS:** `ffmpeg` (Homebrew: `brew install ffmpeg`); adaptive VAAPI decoding is Linux-only.
 - `ffprobe` on PATH (included with ffmpeg)
+
+The VAAPI pipeline uses explicit async depth 2; older FFmpeg builds are not
+qualified. A failed optimization probe retains the existing decoding path, but
+does not establish compatibility with unsupported FFmpeg versions.
 
 For detailed GPU passthrough guidance in containers (Intel, AMD, NVIDIA), see [docs/container-deployment.md](docs/container-deployment.md).
 
@@ -258,6 +283,19 @@ chmod +x deploy.local.sh
 ./deploy.local.sh
 ```
 
+For a Proxmox LXC reached through its host, use `pct push <CTID>` to transfer
+the release and `pct exec <CTID> -- <command>` to run commands in the container.
+Run the Linux test suite before installing. On memory-constrained containers,
+cross-compile test binaries with `GOOS=linux GOARCH=amd64 go test -c` on the
+build machine and execute them inside the container instead.
+
+Before replacing `/usr/local/bin/sqzarr`, pause the queue and wait for running
+jobs to finish. Keep a backup of the current binary, install the new binary,
+restart `sqzarr`, and check `/api/v1/status` and the Settings Plex verification.
+Restore the previous queue pause state after checks. If service startup or
+health checks fail, restore the backup binary and restart the service before
+resuming the queue. No database migration is required for Plex verification.
+
 ---
 
 ## Admin panel
@@ -299,6 +337,20 @@ sqzarr writes a temp file next to the source file before atomically replacing it
 
 **Q: Can I run multiple workers?**  
 Set `worker_concurrency` up to 8. Most GPU hardware handles one HEVC encode stream at a time; running more may not help and will increase temp disk usage.
+
+**Q: How do I verify Plex is working?**
+In Settings → Plex, enable the integration, enter the server URL and token, and save.
+Click **Verify Plex connection** to check connectivity and library access from the
+SQZARR server using the saved token. Unsaved Plex changes must be saved first.
+The result shows the number of accessible libraries or an actionable error;
+an empty library list means there are no accessible libraries to refresh.
+The check is read-only: it does not trigger scans or prove refresh permission or
+media-path mapping. Plex servers configured to allow unauthenticated LAN access
+may grant library access regardless of the token. Verification has a 10-second
+timeout and does not follow redirects; use the final server URL.
+Saved Plex changes also apply to subsequent automatic refresh notifications.
+Tokens stay on the server, are sent to Plex in headers, and are excluded from
+verification results and transport errors. Prefer HTTPS when available.
 
 **Q: The Plex token?**  
 Open Plex Web, sign in, navigate to a library item, open DevTools → Network, filter by your server IP. Any request URL will contain `X-Plex-Token=<your-token>`.

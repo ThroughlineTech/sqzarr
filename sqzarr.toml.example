@@ -11,6 +11,8 @@ interval_hours = 6            # how often to scan directories
 worker_concurrency = 1        # parallel transcode workers (max 8; GPU usually handles 1)
 
 [transcoder]
+hardware_decode = "auto"      # auto: probe eligible H.264 8-bit SDR VAAPI inputs; off: software decode
+low_power = "auto"            # auto/off; requires host qualification and a successful runtime VBR probe
 # temp_dir = "/tmp/sqzarr"     # where in-progress output files are written
                                # default: same directory as source file
 

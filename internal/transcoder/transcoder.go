@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,26 +23,38 @@ type ProgressFunc func(progress, speed, fps float64)
 
 // Transcoder runs ffmpeg jobs using a detected encoder.
 type Transcoder struct {
-	encoder *Encoder
-	log     *slog.Logger
-	tempDir string
+	mu                sync.RWMutex
+	encoder           *Encoder
+	log               *slog.Logger
+	tempDir           string
+	hardwareDecode    string
+	lowPower          string
+	probes            map[string]bool
+	qualificationPath string
 }
 
 // New creates a Transcoder. If tempDir is empty, output files are written
 // adjacent to the source file with a .sqzarr-tmp suffix.
 func New(enc *Encoder, tempDir string, log *slog.Logger) *Transcoder {
-	return &Transcoder{encoder: enc, tempDir: tempDir, log: log}
+	copy := *enc
+	return &Transcoder{encoder: &copy, tempDir: tempDir, log: log, hardwareDecode: "auto", lowPower: "auto", probes: make(map[string]bool), qualificationPath: LowPowerQualificationPath}
 }
 
 // Encoder returns the active encoder.
 func (t *Transcoder) Encoder() *Encoder {
-	return t.encoder
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	copy := *t.encoder
+	return &copy
 }
 
 // SetEncoder swaps the active encoder. The change takes effect on the next
 // transcode job — any currently running job continues with the old encoder.
 func (t *Transcoder) SetEncoder(enc *Encoder) {
-	t.encoder = enc
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	copy := *enc
+	t.encoder = &copy
 }
 
 // Run transcodes inputPath to a temp file, returning the temp output path.
@@ -48,33 +62,75 @@ func (t *Transcoder) SetEncoder(enc *Encoder) {
 // onLog, if non-nil, is called with each non-metric stderr line (startup info, warnings, errors).
 // If the current encoder fails with a device-related error, automatically retries with software encoding.
 func (t *Transcoder) Run(ctx context.Context, inputPath string, duration float64, onProgress ProgressFunc, onLog func(string)) (outputPath string, err error) {
-	outputPath, err = t.run(ctx, inputPath, duration, onProgress, onLog)
-
-	// Check if error is device-related and current encoder is not already software
-	if err != nil && t.encoder.Type != EncoderSoftware && isDeviceError(err) {
-		t.log.Warn("Hardware encoder failed with device error, retrying with software encoder",
-			"original_error", err,
-			"encoder", t.encoder.DisplayName)
-
-		// Clean up the failed output file
-		os.Remove(outputPath)
-
-		// Switch to software encoder and retry
-		originalEncoder := t.encoder
-		t.encoder = softwareEncoder()
-		defer func() { t.encoder = originalEncoder }() // Restore original after retry
-
-		outputPath, err = t.run(ctx, inputPath, duration, onProgress, onLog)
-		if err == nil {
-			t.log.Info("Software encoder fallback succeeded")
+	t.mu.RLock()
+	enc := *t.encoder
+	decodePolicy, lowPower := t.hardwareDecode, t.lowPower
+	t.mu.RUnlock()
+	emit := func(message string) {
+		if onLog != nil {
+			onLog(message)
+		}
+		if t.log != nil {
+			t.log.Info(message)
 		}
 	}
-
-	return outputPath, err
+	attempts := []*Encoder{}
+	if enc.Type == EncoderVAAPI {
+		enc.DisplayName = "Software decode -> standard VAAPI HEVC VBR (/dev/dri/renderD128)"
+		qualified := lowPower == "auto" && lowPowerQualified(t.qualificationPath)
+		if lowPower == "auto" {
+			status := "unqualified"
+			if qualified {
+				status = "qualified"
+			}
+			emit("Low-power VBR qualification: " + status)
+		}
+		if decodePolicy != "off" {
+			v, inspectErr := inspectVideo(ctx, inputPath)
+			if inspectErr == nil && v.eligible() && t.probeDecode(ctx, inputPath, v) {
+				if qualified && t.probeChain(ctx, inputPath, v, true) {
+					attempts = append(attempts, &Encoder{Type: EncoderVAAPI, DisplayName: "VAAPI decode -> qualified low-power HEVC VBR (/dev/dri/renderD128)", BuildArgs: lowPowerArgs})
+				} else if lowPower == "auto" {
+					emit("Low-power VBR unavailable or unqualified; standard hardware VBR selected")
+				}
+				attempts = append(attempts, &Encoder{Type: EncoderVAAPI, DisplayName: "VAAPI decode -> standard HEVC VBR (/dev/dri/renderD128)",
+					BuildArgs: func(i, o string) []string { return vaapiArgs(i, o, true) }})
+			} else {
+				emit("Hardware decode optimization unavailable for this input/probe; software decode selected")
+			}
+		}
+	}
+	attempts = append(attempts, &enc)
+	if enc.Type != EncoderSoftware {
+		attempts = append(attempts, softwareEncoder())
+	}
+	for n, attempt := range attempts {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if n > 0 {
+			emit("Hardware capability failed; retrying with " + attempt.DisplayName)
+			if onProgress != nil {
+				onProgress(0, 0, 0)
+			}
+		}
+		emit("Encoding pipeline: " + attempt.DisplayName)
+		outputPath, err = t.run(ctx, attempt, inputPath, duration, onProgress, onLog)
+		if err == nil {
+			return outputPath, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if !isDeviceError(err) {
+			return "", err
+		}
+	}
+	return "", err
 }
 
 // run performs the actual ffmpeg transcoding. It's separated to allow retries with fallback.
-func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64, onProgress ProgressFunc, onLog func(string)) (outputPath string, err error) {
+func (t *Transcoder) run(ctx context.Context, encoder *Encoder, inputPath string, duration float64, onProgress ProgressFunc, onLog func(string)) (outputPath string, err error) {
 	outputPath = t.tempOutputPath(inputPath)
 
 	// Ensure temp dir exists.
@@ -82,12 +138,36 @@ func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 
-	args := rebuildWithProgress(t.encoder.BuildArgs(inputPath, outputPath))
+	ext := filepath.Ext(outputPath)
+	scratch, err := os.CreateTemp(filepath.Dir(outputPath), strings.TrimSuffix(filepath.Base(outputPath), ext)+"-*"+ext)
+	if err != nil {
+		return "", fmt.Errorf("create scratch: %w", err)
+	}
+	outputPath = scratch.Name()
+	// CreateTemp defaults to 0600. FFmpeg preserves an existing file's mode,
+	// and this output becomes library media after verification/replacement.
+	// Match the previous ordinary media-file mode so Plex can read it.
+	if err = scratch.Chmod(0o644); err != nil {
+		scratch.Close()
+		os.Remove(outputPath)
+		return "", fmt.Errorf("set scratch media permissions: %w", err)
+	}
+	if err = scratch.Close(); err != nil {
+		os.Remove(outputPath)
+		return "", err
+	}
+	ownedPath := outputPath
+	defer func() {
+		if err != nil {
+			os.Remove(ownedPath)
+		}
+	}()
+	args := rebuildWithProgress(encoder.BuildArgs(inputPath, outputPath))
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 
 	// Set LIBVA_DRIVER_NAME for VAAPI.
-	if t.encoder.Type == EncoderVAAPI {
+	if encoder.Type == EncoderVAAPI {
 		cmd.Env = append(os.Environ(), "LIBVA_DRIVER_NAME=iHD")
 	} else {
 		cmd.Env = os.Environ()
@@ -107,12 +187,18 @@ func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
-		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 256*1024), 256*1024)
+		reader := bufio.NewReaderSize(stderr, 64*1024)
 		var currentTime, currentSpeed, currentFPS float64
-		for sc.Scan() {
-			line := sc.Text()
-			stderrLines = append(stderrLines, line)
+		for {
+			fragment, readErr := reader.ReadSlice('\n')
+			line := strings.TrimSpace(string(fragment))
+			// ReadSlice continues draining oversized lines in bounded fragments.
+			if isDiagLine(line) {
+				stderrLines = append(stderrLines, line)
+				if len(stderrLines) > 30 {
+					stderrLines = stderrLines[1:]
+				}
+			}
 
 			// Auto-detect duration from ffmpeg header if caller didn't supply it.
 			if duration == 0 {
@@ -149,11 +235,15 @@ func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64
 					onProgress(pct, currentSpeed, currentFPS)
 				}
 			}
+			if readErr != nil && readErr != bufio.ErrBufferFull {
+				break
+			}
 		}
+		io.Copy(io.Discard, reader)
 	}()
 
+	<-stderrDone
 	if err := cmd.Wait(); err != nil {
-		<-stderrDone
 		os.Remove(outputPath)
 		diag := ffmpegDiagnostic(stderrLines)
 		if diag != "" {
@@ -161,8 +251,11 @@ func (t *Transcoder) run(ctx context.Context, inputPath string, duration float64
 		}
 		return "", fmt.Errorf("ffmpeg: %w", err)
 	}
-	<-stderrDone
 
+	info, statErr := os.Stat(outputPath)
+	if statErr != nil || info.Size() == 0 {
+		return "", fmt.Errorf("ffmpeg produced no usable output")
+	}
 	return outputPath, nil
 }
 
@@ -234,17 +327,30 @@ func isDeviceError(err error) bool {
 	}
 
 	errMsg := strings.ToLower(err.Error())
+	for _, p := range []string{"no space left", "permission denied", "invalid data found", "error opening input", "error opening output", "input/output error", "read-only file system", "no such file or directory", "corrupt", "error while decoding"} {
+		if strings.Contains(errMsg, p) {
+			return false
+		}
+	}
 	devicePatterns := []string{
-		"cannot load",
-		"could not dynamically load",
+		"cannot load libcuda",
+		"cannot load libnvidia",
 		"device creation failed",
 		"no device available",
 		"hardware device setup failed",
-		"permission denied",
-		"/dev/dri",
-		"cuda",
-		"vaapi",
 		"device not found",
+		"failed to initialise vaapi connection",
+		"failed to initialize vaapi connection",
+		"failed to create a vaapi",
+		"failed to create decode configuration",
+		"failed to create encode configuration",
+		"no usable encoding entrypoint",
+		"no support for codec",
+		"failed setup for format vaapi",
+		"hardware does not support",
+		"failed to sync surface",
+		"failed to synchronise surface",
+		"failed to issue encode",
 	}
 
 	for _, pattern := range devicePatterns {

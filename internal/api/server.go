@@ -147,6 +147,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Runtime config
 	api.HandleFunc("GET /config", s.handleGetConfig)
 	api.HandleFunc("PUT /config", s.handleUpdateConfig)
+	api.HandleFunc("POST /plex/verify", s.handleVerifyPlex)
 
 	// Worker control
 	api.HandleFunc("POST /queue/pause", s.handlePauseQueue)

@@ -124,6 +124,9 @@ export interface RuntimeConfig {
   plex_base_url: string
   plex_token: string  // empty string = not set; "SET" = already configured
   encoder: string     // active encoder type: "vaapi", "nvenc", "videotoolbox", "software"
+  hardware_decode: 'auto' | 'off'
+  low_power: 'auto' | 'off'
+  low_power_status: string
   has_password: boolean
 }
 
@@ -210,6 +213,7 @@ export const api = {
   resumeQueue: () => request<{ paused: boolean }>('POST', '/queue/resume'),
 
   getConfig: () => request<RuntimeConfig>('GET', '/config'),
+  verifyPlex: () => request<{ library_count: number }>('POST', '/plex/verify'),
   updateConfig: (updates: Partial<RuntimeConfig> & { plex_token?: string; root_dirs?: string[]; encoder?: string }) =>
     request<RuntimeConfig>('PUT', '/config', updates),
 

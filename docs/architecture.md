@@ -18,8 +18,36 @@ This document is the concise, current architecture reference for the running sys
 - Verifier: confirms output validity before replacing source.
 - Originals workflow: processed originals moved to per-root processed dir, with retention/restore controls.
 - Integrations: optional Plex refresh after successful replacement.
+- `POST /api/v1/plex/verify` checks saved Plex settings through the existing API
+  authentication middleware. It reads `/library/sections`, validates the XML
+  container, and returns only `library_count`. Disabled/incomplete configuration
+  returns 400; upstream failures return 502 with sanitized messages (Plex 401/403
+  do not log the user out of SQZARR). Requests use a 10-second timeout, bounded
+  response decoding, header-only tokens, and no redirects. Saving Plex settings
+  replaces the worker notifier for subsequent refreshes without a restart.
 
 ## Data and state
+
+### Transcoding policy
+
+`[transcoder] hardware_decode` and `low_power` accept `auto` or `off`, defaulting
+to `auto` for existing configurations. Startup and the runtime settings API apply
+these policies through `Transcoder.SetPolicy`; each job snapshots its policy.
+`GET /api/v1/config` reports both policies and `low_power_status` as `off`,
+`unqualified` or `qualified` from the transcoder's host qualification check.
+`PUT /api/v1/config` rejects invalid policy values before changing settings.
+
+Automatic VAAPI decoding is restricted to qualified H.264 8-bit SDR inputs.
+The transcoder probes the actual production chain and retains software decoding
+for other input classes or unsupported chains. Low-power VBR requires a trusted
+host qualification manifest matching the device/software/input class/settings,
+plus a successful runtime chain probe. Without qualification it stays unavailable
+even in `auto` mode: a fast CQP encode is not proof of equivalent bitrate-controlled
+behavior. No implicit CQP switch or host-name-specific selection is permitted.
+
+Settings exposes a small hardware-decoding override. Per-job diagnostics report
+the actual selected pipeline and fallback; a configured `auto` value alone does
+not claim that hardware decoding succeeded.
 
 - DB: SQLite (sqzarr.db) with migrations applied on startup.
 - Primary entities:

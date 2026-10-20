@@ -15,6 +15,7 @@ import (
 
 	"github.com/danrichardson/sqzarr/internal/config"
 	"github.com/danrichardson/sqzarr/internal/db"
+	"github.com/danrichardson/sqzarr/internal/scanner"
 	"github.com/danrichardson/sqzarr/internal/transcoder"
 )
 
@@ -32,17 +33,17 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	encoderName := s.encoder.DisplayName
 	s.mu.Unlock()
 	out := map[string]any{
-		"version":            "1.0.0",
-		"encoder":            encoderName,
-		"paused":             s.worker.IsPaused(),
-		"total_saved_gb":     float64(stats.TotalBytesSaved) / (1024 * 1024 * 1024),
-		"jobs_done":          stats.TotalJobsDone,
-		"jobs_failed":        stats.TotalJobsFailed,
-		"disk_free_gb": diskFree,
-		"disk_path":    diskPath,
-		"cpu_percent":  cpuPct,
-		"gpu_mhz":            gpuMHz,
-		"gpu_percent":        gpuPct, // -1 = unavailable, use gpu_mhz instead
+		"version":        "1.0.0",
+		"encoder":        encoderName,
+		"paused":         s.worker.IsPaused(),
+		"total_saved_gb": float64(stats.TotalBytesSaved) / (1024 * 1024 * 1024),
+		"jobs_done":      stats.TotalJobsDone,
+		"jobs_failed":    stats.TotalJobsFailed,
+		"disk_free_gb":   diskFree,
+		"disk_path":      diskPath,
+		"cpu_percent":    cpuPct,
+		"gpu_mhz":        gpuMHz,
+		"gpu_percent":    gpuPct, // -1 = unavailable, use gpu_mhz instead
 	}
 	if s.sched != nil {
 		next := s.sched.NextScanAt()
@@ -121,6 +122,10 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.safePathIn(req.Path) {
 		jsonError(w, "path is not within a configured directory", http.StatusBadRequest)
+		return
+	}
+	if scanner.IsScratchPath(req.Path) {
+		jsonError(w, "temporary transcode output cannot be queued", http.StatusBadRequest)
 		return
 	}
 
@@ -226,6 +231,10 @@ func (s *Server) handleEnqueueDir(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		if !videoExtensions[strings.ToLower(filepath.Ext(d.Name()))] {
+			return nil
+		}
+		if scanner.IsScratchPath(path) {
+			skipped++
 			return nil
 		}
 		exists, _ := s.db.SourcePathExists(path)
@@ -805,8 +814,11 @@ func (s *Server) handleGetEncoders(w http.ResponseWriter, r *http.Request) {
 
 // GET /config — returns runtime-editable settings
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	plexCfg := s.cfg.Plex
+	s.mu.Unlock()
 	plexToken := ""
-	if s.cfg.Plex.Token != "" {
+	if plexCfg.Token != "" {
 		plexToken = "SET"
 	}
 	roots := s.cfg.Scanner.RootDirs
@@ -815,39 +827,46 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	activeEncoder := string(s.encoder.Type)
+	hardwareDecode := s.cfg.Transcoder.HardwareDecode
+	lowPower := s.cfg.Transcoder.LowPower
 	s.mu.Unlock()
 	jsonOK(w, map[string]any{
-		"root_dirs":                  roots,
-		"worker_concurrency":         s.cfg.Scanner.WorkerConcurrency,
-		"scan_interval_hours":        s.cfg.Scanner.IntervalHours,
-		"processed_dir_name":         s.cfg.Safety.ProcessedDirName,
-		"originals_retention_days":   s.cfg.Safety.OriginalsRetentionDays,
-		"fail_threshold":             s.cfg.Safety.FailThreshold,
-		"system_fail_threshold":      s.cfg.Safety.SystemFailThreshold,
-		"delete_confirm_single":      s.cfg.Safety.DeleteConfirmSingle,
-		"plex_enabled":               s.cfg.Plex.Enabled,
-		"plex_base_url":              s.cfg.Plex.BaseURL,
-		"plex_token":                 plexToken,
-		"encoder":                    activeEncoder,
-		"has_password":               s.cfg.Auth.PasswordHash != "",
+		"root_dirs":                roots,
+		"worker_concurrency":       s.cfg.Scanner.WorkerConcurrency,
+		"scan_interval_hours":      s.cfg.Scanner.IntervalHours,
+		"processed_dir_name":       s.cfg.Safety.ProcessedDirName,
+		"originals_retention_days": s.cfg.Safety.OriginalsRetentionDays,
+		"fail_threshold":           s.cfg.Safety.FailThreshold,
+		"system_fail_threshold":    s.cfg.Safety.SystemFailThreshold,
+		"delete_confirm_single":    s.cfg.Safety.DeleteConfirmSingle,
+		"plex_enabled":             plexCfg.Enabled,
+		"plex_base_url":            plexCfg.BaseURL,
+		"plex_token":               plexToken,
+		"encoder":                  activeEncoder,
+		"hardware_decode":          hardwareDecode,
+		"low_power":                lowPower,
+		"low_power_status":         s.transcoder.LowPowerStatus(),
+		"has_password":             s.cfg.Auth.PasswordHash != "",
 	})
 }
 
 // PUT /config — updates runtime-editable settings in memory and on disk
 func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RootDirs                []string `json:"root_dirs"`
-		WorkerConcurrency       *int     `json:"worker_concurrency"`
-		ScanIntervalHours       *int     `json:"scan_interval_hours"`
-		ProcessedDirName        *string  `json:"processed_dir_name"`
-		OriginalsRetentionDays  *int     `json:"originals_retention_days"`
-		FailThreshold           *int     `json:"fail_threshold"`
-		SystemFailThreshold     *int     `json:"system_fail_threshold"`
-		DeleteConfirmSingle     *bool    `json:"delete_confirm_single"`
-		PlexEnabled             *bool    `json:"plex_enabled"`
-		PlexBaseURL             *string  `json:"plex_base_url"`
-		PlexToken               *string  `json:"plex_token"`
-		Encoder                 *string  `json:"encoder"`
+		RootDirs               []string `json:"root_dirs"`
+		WorkerConcurrency      *int     `json:"worker_concurrency"`
+		ScanIntervalHours      *int     `json:"scan_interval_hours"`
+		ProcessedDirName       *string  `json:"processed_dir_name"`
+		OriginalsRetentionDays *int     `json:"originals_retention_days"`
+		FailThreshold          *int     `json:"fail_threshold"`
+		SystemFailThreshold    *int     `json:"system_fail_threshold"`
+		DeleteConfirmSingle    *bool    `json:"delete_confirm_single"`
+		PlexEnabled            *bool    `json:"plex_enabled"`
+		PlexBaseURL            *string  `json:"plex_base_url"`
+		PlexToken              *string  `json:"plex_token"`
+		Encoder                *string  `json:"encoder"`
+		HardwareDecode         *string  `json:"hardware_decode"`
+		LowPower               *string  `json:"low_power"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -855,6 +874,15 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileUpdates := map[string]string{}
+	// Validate optimization policies before any settings are changed.
+	for name, value := range map[string]*string{"hardware_decode": req.HardwareDecode, "low_power": req.LowPower} {
+		if value != nil {
+			if err := config.ValidateTranscodePolicy(*value); err != nil {
+				jsonError(w, name+": "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+	}
 
 	if req.RootDirs != nil {
 		// Validate each root: must exist and be a real directory.
@@ -939,18 +967,23 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		s.cfg.Safety.DeleteConfirmSingle = *req.DeleteConfirmSingle
 		fileUpdates["delete_confirm_single"] = strconv.FormatBool(*req.DeleteConfirmSingle)
 	}
+	s.mu.Lock()
 	if req.PlexEnabled != nil {
 		s.cfg.Plex.Enabled = *req.PlexEnabled
 		fileUpdates["enabled"] = strconv.FormatBool(*req.PlexEnabled)
 	}
 	if req.PlexBaseURL != nil {
 		s.cfg.Plex.BaseURL = *req.PlexBaseURL
-		fileUpdates["base_url"] = `"` + *req.PlexBaseURL + `"`
+		fileUpdates["base_url"] = strconv.Quote(*req.PlexBaseURL)
 	}
 	if req.PlexToken != nil && *req.PlexToken != "" {
 		s.cfg.Plex.Token = *req.PlexToken
-		fileUpdates["token"] = `"` + *req.PlexToken + `"`
+		fileUpdates["token"] = strconv.Quote(*req.PlexToken)
 	}
+	if req.PlexEnabled != nil || req.PlexBaseURL != nil || req.PlexToken != nil {
+		s.updatePlexNotifier()
+	}
+	s.mu.Unlock()
 	if req.Encoder != nil {
 		chosen := *req.Encoder
 		// Validate against available encoders.
@@ -974,6 +1007,20 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("encoder changed", "encoder", match.DisplayName)
 	}
 
+	if req.HardwareDecode != nil || req.LowPower != nil {
+		s.mu.Lock()
+		if req.HardwareDecode != nil {
+			s.cfg.Transcoder.HardwareDecode = *req.HardwareDecode
+			fileUpdates["hardware_decode"] = strconv.Quote(*req.HardwareDecode)
+		}
+		if req.LowPower != nil {
+			s.cfg.Transcoder.LowPower = *req.LowPower
+			fileUpdates["low_power"] = strconv.Quote(*req.LowPower)
+		}
+		s.transcoder.SetPolicy(s.cfg.Transcoder.HardwareDecode, s.cfg.Transcoder.LowPower)
+		s.mu.Unlock()
+	}
+
 	if s.cfgPath != "" && len(fileUpdates) > 0 {
 		if err := config.UpdateFile(s.cfgPath, fileUpdates); err != nil {
 			s.log.Warn("could not write config file", "error", err)
@@ -992,16 +1039,16 @@ func (s *Server) handleListOriginals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type row struct {
-		ID           int64     `json:"id"`
-		JobID        int64     `json:"job_id"`
-		OriginalPath string    `json:"original_path"`
-		HeldPath     string    `json:"held_path"`
-		OutputPath   string    `json:"output_path"`
-		OriginalSize int64     `json:"original_size"`
-		OutputSize   int64     `json:"output_size"`
-		ExpiresAt    time.Time `json:"expires_at"`
-		CreatedAt    time.Time `json:"created_at"`
-		DaysRemaining int      `json:"days_remaining"`
+		ID            int64     `json:"id"`
+		JobID         int64     `json:"job_id"`
+		OriginalPath  string    `json:"original_path"`
+		HeldPath      string    `json:"held_path"`
+		OutputPath    string    `json:"output_path"`
+		OriginalSize  int64     `json:"original_size"`
+		OutputSize    int64     `json:"output_size"`
+		ExpiresAt     time.Time `json:"expires_at"`
+		CreatedAt     time.Time `json:"created_at"`
+		DaysRemaining int       `json:"days_remaining"`
 	}
 	out := make([]row, 0, len(records))
 	for _, rec := range records {
@@ -1104,15 +1151,15 @@ var videoExtensions = map[string]bool{
 
 // fsFileEntry is returned by GET /fs for each video file.
 type fsFileEntry struct {
-	Path      string    `json:"path"`
-	Name      string    `json:"name"`
-	Size      int64     `json:"size"`
-	Modified  time.Time `json:"modified"`
-	Codec     string    `json:"codec,omitempty"`
-	Bitrate   int64     `json:"bitrate,omitempty"`
-	Duration  float64   `json:"duration,omitempty"`
-	JobStatus string    `json:"job_status,omitempty"`
-	BytesSaved int64   `json:"bytes_saved,omitempty"`
+	Path       string    `json:"path"`
+	Name       string    `json:"name"`
+	Size       int64     `json:"size"`
+	Modified   time.Time `json:"modified"`
+	Codec      string    `json:"codec,omitempty"`
+	Bitrate    int64     `json:"bitrate,omitempty"`
+	Duration   float64   `json:"duration,omitempty"`
+	JobStatus  string    `json:"job_status,omitempty"`
+	BytesSaved int64     `json:"bytes_saved,omitempty"`
 }
 
 // GET /fs?path=<dir>&files=1&unrestricted=1 — list subdirectories (and optionally video files with metadata)
@@ -1185,10 +1232,10 @@ func (s *Server) handleBrowseFS(w http.ResponseWriter, r *http.Request) {
 		if jobMeta != nil {
 			for i := range fileEntries {
 				if m, ok := jobMeta[fileEntries[i].Path]; ok {
-					fileEntries[i].Codec      = m.Codec
-					fileEntries[i].Bitrate    = m.Bitrate
-					fileEntries[i].Duration   = m.Duration
-					fileEntries[i].JobStatus  = m.Status
+					fileEntries[i].Codec = m.Codec
+					fileEntries[i].Bitrate = m.Bitrate
+					fileEntries[i].Duration = m.Duration
+					fileEntries[i].JobStatus = m.Status
 					fileEntries[i].BytesSaved = m.BytesSaved
 				}
 			}
@@ -1251,4 +1298,3 @@ func (s *Server) diskFreeGB() (float64, string) {
 	}
 	return float64(stat.Bavail) * float64(stat.Bsize) / (1024 * 1024 * 1024), checkPath
 }
-

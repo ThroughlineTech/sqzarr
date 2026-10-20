@@ -38,20 +38,18 @@ func TestVerifyPassesValidOutput(t *testing.T) {
 }
 
 func TestVerifyFailsWhenOutputLarger(t *testing.T) {
-	requireFFmpeg(t)
-
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.mkv")
 	output := filepath.Join(dir, "output.mkv")
 
-	// Low-bitrate input.
-	run(t, "ffmpeg", "-y", "-f", "lavfi",
-		"-i", "testsrc=duration=10:size=320x240:rate=25",
-		"-c:v", "libx264", "-b:v", "100k", input)
-
-	// Higher-bitrate output — should be flagged as uncompressible.
-	run(t, "ffmpeg", "-y", "-i", input,
-		"-c:v", "libx264", "-b:v", "5000k", output)
+	// The size gate precedes probing. Keep both files above its absolute
+	// floor so this tests uncompressibility, not a variable encoder bitrate.
+	if err := os.WriteFile(input, make([]byte, 2*1024*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, make([]byte, 3*1024*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := verifier.Verify(input, output, 1.0)
 	if err != nil {

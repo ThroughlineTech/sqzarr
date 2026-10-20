@@ -1,0 +1,235 @@
+Paste this into the research agent:
+
+```text
+Research why two Intel Proxmox hosts deliver similar single-stream HEVC transcoding performance despite a three-generation hardware gap. We need an evidence-based explanation and a prioritized experiment plan—not generic tuning advice.
+
+Do research only. Do not change hosts, install packages, reboot, or modify media. Distinguish established observations from hypotheses. Prefer Intel, Linux kernel, FFmpeg, intel-media-driver, and Lenovo primary sources. Cite sources and note hardware/version limitations.
+
+ENVIRONMENT
+
+Application: SQZARR, using FFmpeg to convert media to HEVC through VAAPI.
+
+pve2:
+- Intel Core i5-8350U, 8th generation, 4 cores / 8 threads.
+- Original SQZARR container CT260 remains STOPPED.
+- Benchmark runs its existing ffmpeg/userspace offline via chroot, in a private mount namespace.
+- taskset pins the benchmark to CPUs 2,3: separate physical cores.
+- Media bind is read-only.
+- Intel iHD VAAPI driver, /dev/dri/renderD128.
+
+pve5:
+- Intel Core i7-1185G7, 11th generation, 4 cores / 8 threads.
+- Lenovo ThinkPad X1 Carbon Gen 9, model 20XW004NUS.
+- BIOS N32ETA1W (1.77), dated 2026-02-18.
+- Active SQZARR container CT261.
+- 2 logical CPUs, pinned to CPUs 2,3: separate physical cores.
+- 512 MiB RAM plus 512 MiB swap.
+- Intel iHD VAAPI driver, /dev/dri/renderD128 passed through.
+- Other guests, including Plex, run on the host.
+- Fans are in automatic mode; recent benchmark readings approximately 6,570 RPM.
+- Earlier inspection: AC connected, USB-PD negotiated 20 V / 3.25 A (65 W), battery approximately 98%, not charging, lap mode off. These are historical observations and should be rechecked if relevant.
+
+pve3:
+- Intel Core i7-8650U.
+- Used as a CPU-policy configuration reference, not benchmarked.
+
+All three hosts were updated and rebooted. Latest tests used Proxmox kernel 7.0.14-25-pve.
+
+CURRENT CPU POLICY
+
+At the user's explicit request, pve5 was configured to match pve2/pve3:
+- Kernel argument intel_pstate=disable.
+- Driver acpi-cpufreq.
+- cpufreqd 2.4.2-3.
+- cpufrequtils and libcpufreq0 008-2.
+- TLP 1.8.0-1.
+- Configuration files match byte-for-byte across the three hosts.
+- Live governor: performance.
+- Boost: enabled.
+- Energy-performance bias: 4, balance_performance.
+
+cpufreqd:
+- Poll interval 2 seconds.
+- AC rule: performance governor, min/max requests 100%.
+- Hot-CPU rule: temperature 55–100°C and CPU usage 50–100% selects an 80% performance profile.
+- Battery profiles: 80%, 60%, or 40% depending on charge.
+- These are configured rules; we have not established which sensor rules actually trigger.
+
+TLP/cpufrequtils:
+- Both configure conservative governor on AC.
+- TLP enables CPU boost and balance_performance energy bias.
+- Despite these overlapping settings, the observed live governor is performance, consistent with cpufreqd.
+- Investigate rule precedence and actual behavior rather than assuming the configuration text equals effective policy.
+
+auto-cpufreq:
+- pve2 and pve3 have broken installation remnants.
+- Running --version fails with ModuleNotFoundError: No module named 'auto_cpufreq'.
+- No auto-cpufreq daemon is running.
+- Do not attribute their performance to auto-cpufreq.
+
+pve5's earlier custom service forcing the platform profile to performance was disabled when matching the older hosts.
+- Current firmware platform profile: balanced.
+- CPU governor separately reads performance.
+- Do not confuse these two controls.
+
+Policy-frequency values are not reliable measurements of actual turbo clocks:
+- pve2 policy min/max read 1.7 GHz, while /proc/cpuinfo snapshots showed roughly 3.5–3.6 GHz.
+- pve3 policy min/max read 2.0 GHz, with snapshots around 3.9–4.0 GHz.
+- pve5 current acpi-cpufreq policy min/max read 3.001 GHz, boost enabled.
+- Before switching drivers, pve5 with turbo working showed test cores near 4.3 GHz.
+
+SOURCE AND EXACT BENCHMARK
+
+Source:
+michael.che.shot.in.minnesota.2026.720p.web.h264-jff.mkv
+- 1280×720 H.264, approximately 23.976 fps.
+- Full source duration approximately 3551.936 seconds.
+- Source has EAC3 audio and ASS subtitles.
+
+Preparation:
+- Stream-copy the first 40 seconds of VIDEO ONLY to local storage.
+- Loop that local sample and encode 90 seconds.
+- Null output, no audio or subtitles.
+- This excludes network reads and output-disk writes from the timed encode.
+- Each successful run produces 2,152 frames and reports 89.964875 seconds.
+- Three consecutive runs per host.
+- Timing includes process/container-launch overhead.
+- SQZARR queue paused/drained for pve5 tests and restored afterward.
+- Other host workloads were not fully isolated.
+
+Equivalent FFmpeg command:
+
+LIBVA_DRIVER_NAME=iHD ffmpeg \
+  -v error -nostdin \
+  -init_hw_device vaapi=va:/dev/dri/renderD128 \
+  -filter_hw_device va \
+  -stream_loop -1 -i /var/tmp/sqzarr-perf-sample.mkv \
+  -t 90 \
+  -vf 'format=nv12,hwupload,scale_vaapi=w=min(1920\,iw):h=-2' \
+  -c:v hevc_vaapi \
+  -b:v 2300k -maxrate 4000k -bufsize 4600k \
+  -an -sn -progress pipe:1 -f null -
+
+Important:
+- H.264 decoding is currently SOFTWARE decoding.
+- Pixel conversion precedes hwupload.
+- scale_vaapi is present although this 720p source does not need downscaling.
+- This is VAAPI HEVC encoding, not libx265.
+- Exact FFmpeg, libva and intel-media-driver versions must still be inventoried.
+- Do not assume identical encoder defaults or quality across GPU generations.
+
+LATEST RESULTS, AFTER UPDATES
+
+pve2:
+- Speeds: 6.39×, 6.51×, 6.38×; mean 6.43× realtime.
+- Elapsed: 14.09, 13.83, 14.10 seconds.
+- Peak package temperatures: 80, 81, 75°C.
+- Package thermal-counter increments: 119, 355, 0.
+- Actual GPU clocks: sampled means approximately 906, 948, 983 MHz; peak 1100 MHz.
+- MSR package PL1: 25 W.
+- MMIO package PL1: 15 W.
+- Newer GPU throttle-reason attributes unavailable.
+- Early fan readings included 0 and 65535 and are not reliable evidence.
+
+pve5:
+- Speeds: 7.07×, 6.58×, 6.69×; mean 6.78×.
+- Elapsed: 12.73, 13.67, 13.45 seconds.
+- Peak package temperatures: 87, 79, 68°C.
+- Package thermal-counter increments: 58, 0, 0.
+- Actual GPU clocks: sampled means approximately 1024, 931, 990 MHz; peak 1100 MHz.
+- Requested GPU clocks: approximately 1337–1343 MHz.
+- MMIO package PL1: 15 W.
+- GPU PL1 flag clear in first two runs; briefly asserted in third.
+- Fans approximately 6570 RPM.
+
+pve5 therefore averaged only about 5.5% faster.
+
+Telemetry was sampled approximately every 250 ms. Thermal counters are host-wide and include other workloads. Do not interpret sampled GPU frequency as media-engine utilization or assume it directly measures every media clock domain.
+
+HISTORY THAT MAY HELP
+
+1. Initially pve5 used balanced platform policy and CPUs 3,7, which are sibling threads of one physical core:
+   - Approximately 1.68–1.73×.
+   - GPU actual clocks around 650–700 MHz maximum despite requests near 1350.
+   - GPU PL1 flag active.
+   - MMIO limit observed at 8 W under load and 15 W idle.
+
+2. Changed to performance platform profile and physical cores 2,3:
+   - 6.66×, then 4.28×, then 2.60×.
+   - First runs reached 99–100°C with thermal events.
+   - Later GPU clocks fell sharply and power-limit flags appeared.
+   - This was not sustained improvement.
+
+3. Later retest:
+   - 4.62×, 4.69×, 4.66×.
+   - Peak 65–67°C, no new thermal events.
+   - GPU PL1 almost continuously active; actual GPU ~600 MHz average.
+   - MMIO limit 15 W.
+
+4. User disabled SpeedStep and CPU power management in BIOS:
+   - CPU became capped at 1.2 GHz; no_turbo=1.
+   - 3.83×, 3.67×, 3.87×.
+   - GPU PL1 flags clear, peak temperatures only 52–55°C.
+   - ffmpeg snapshot approximately 177% CPU.
+   - Strong evidence that CPU-side work can bottleneck this pipeline.
+
+5. Subsequent BIOS changes restored turbo:
+   - CPU test cores approximately 4.3 GHz.
+   - 7.07×, 7.07×, 7.08×.
+   - Peaks 85, 91, 95°C; increasing thermal counters.
+   - GPU PL1 flags clear.
+
+6. Matched pve2/pve3 CPU-policy stack:
+   - 7.07×, 6.93×, 6.70×.
+   - Peaks 84, 75, 69°C; no new thermal events.
+   - Platform profile balanced, CPU governor performance.
+   - Then the latest kernel-update results listed above.
+
+Other prior experiments:
+- Local sample testing showed the original slowdown persisted without NFS.
+- A separate accidental USB disconnect on pve2 suspended its storage pools; this was recovered. Latest tests began with healthy storage.
+- No container OOM, swap pressure or CPU quota throttling was identified in earlier checks.
+- Low-power HEVC with the requested bitrate settings previously failed; only CQP appeared supported and HuC was reported disabled. Exact driver capability and firmware status need verification.
+- A previous hardware-decode experiment combined with -stream_loop hit filter-reinitialization errors. Failed runs were excluded. Design a valid test that avoids this artifact.
+- No raw power-limit override has been applied.
+
+QUESTIONS TO ANSWER
+
+1. What HEVC encoding architecture differences actually matter between these two GPU generations? Distinguish fixed-function encoding, shader-assisted paths, execution units, media clocks, and codec capabilities.
+2. Is the current hevc_vaapi command likely to select comparable paths and quality settings on both generations? What defaults or driver differences could conceal performance gains?
+3. Could software decoding, conversion, upload, unnecessary scaling, limited CPU allocation, or synchronization be setting the throughput ceiling?
+4. How should we interpret actual/requested GPU clocks, PL1 flags, MSR/MMIO limits and thermal counters here? Which additional measurements distinguish causes?
+5. Could cpufreqd’s hot-CPU rule or competing TLP settings explain the behavior? How can we observe active decisions without changing policy?
+6. Would hardware decode with GPU-resident frames, different async depth, explicit quality level, or low-power encoding help? Specify prerequisites and tradeoffs.
+7. Is this single 720p stream a poor test of the newer hardware’s advantage? Propose higher-resolution and concurrent-stream tests.
+8. How can we separate hardware-generation effects from host load, power policy, driver versions, output quality and cooling?
+9. Are there relevant documented bugs or firmware/driver limitations for the i7-1185G7/X1 Carbon Gen 9 under Linux? Avoid treating anecdotes as established fixes.
+
+DELIVERABLE
+
+Provide:
+A. Ranked hypotheses with confidence, supporting evidence, contradictory evidence, and what would falsify each.
+B. A short read-only inventory/telemetry checklist with commands.
+C. A prioritized experiment matrix. For EACH experiment include:
+   - Exact command or configuration delta.
+   - One variable changed.
+   - Prerequisites.
+   - Metrics to collect.
+   - What each possible result would mean.
+   - Quality/comparability implications.
+   - Runtime and disruption risk.
+   - Rollback, if applicable.
+D. The three highest-value tests to run first.
+E. A sustained-test design long enough to reveal thermal/power adaptation, with repeatability controls.
+F. A clear answer to whether a large single-stream HEVC speedup should actually be expected from this generation gap.
+
+Operational constraints:
+- Keep CT260 stopped; CT261 owns the production IP.
+- Never run both containers with that IP.
+- Benchmark copies only; never overwrite source media.
+- Prefer local input and null output for isolation; use scratch output when validating quality/correctness.
+- Pause/drain and restore SQZARR’s original queue state.
+- Do not disable thermal protections or propose blind power-limit increases.
+- BIOS changes, host reboots, firmware updates and other disruptive experiments must be clearly separated from low-risk tests.
+- If software/test binaries need compiling, build on the workstation and push them to the container. Do not compile on the media containers; SQLite compilation previously caused an OOM.
+```
